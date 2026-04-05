@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 import random
 from fpdf import FPDF
 
@@ -12,29 +13,38 @@ st.markdown("Build, validate, and document patient-based real-time quality contr
 
 # --- SIDEBAR: PHASE 2 CONFIGURATION ---
 st.sidebar.header("📝 1. Report Metadata")
-org_name = st.sidebar.text_input("Organization / Laboratory", value="My Laboratory")
-assay_name = st.sidebar.text_input("Assay Name", value="Potassium")
-unit = st.sidebar.text_input("Unit", value="mmol/L")
+org_name = st.sidebar.text_input("Organization / Laboratory", value="Roche Diagnostics India")
+assay_name = st.sidebar.text_input("Assay Name", value="AST_KRL")
+unit = st.sidebar.text_input("Unit", value="U/L")
 
 st.sidebar.markdown("---")
 st.sidebar.header("📐 2. AON Parameters")
 algorithm = st.sidebar.selectbox("Algorithm", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
-block_size = st.sidebar.number_input("Block Size (N)", min_value=5, max_value=200, value=50, step=5)
+st.sidebar.caption("Compare multiple block sizes simultaneously (comma-separated):")
+block_sizes_input = st.sidebar.text_input("Block Sizes / Windows (N)", value="10, 25, 50, 100")
 
 st.sidebar.markdown("**Algorithmic Truncation Limits**")
-st.sidebar.caption("These limits filter the 'normal' population for the moving average.")
-trunc_min = st.sidebar.number_input("Lower Truncation Limit", value=3.5, step=0.1)
-trunc_max = st.sidebar.number_input("Upper Truncation Limit", value=5.5, step=0.1)
+trunc_min = st.sidebar.number_input("Lower Truncation Limit", value=18.0, step=0.1)
+trunc_max = st.sidebar.number_input("Upper Truncation Limit", value=45.0, step=0.1)
 
 st.sidebar.markdown("**Control Limits (Alarms)**")
-st.sidebar.caption("Multiplier for the Moving Average Standard Deviation")
 control_limit_z = st.sidebar.number_input("Z-Score Multiplier", value=3.0, step=0.1)
 
 st.sidebar.markdown("---")
-st.sidebar.header("🎯 3. Simulation Bias")
-st.sidebar.caption("Enter comma-separated percentages (e.g., -10, -5, 5, 10)")
-bias_input = st.sidebar.text_input("Systematic Errors (%)", value="-10, -5, -2, 2, 5, 10")
-sim_runs = st.sidebar.number_input("Simulations per Bias", min_value=5, max_value=50, value=20)
+st.sidebar.header("🎯 3. Simulation Settings")
+sim_runs = st.sidebar.number_input("Simulations per Bias", min_value=5, max_value=100, value=20)
+samples_before = st.sidebar.number_input("Samples before bias injection", value=150, step=10)
+samples_after = st.sidebar.number_input("Samples after bias injection", value=150, step=10)
+
+st.sidebar.markdown("**Systematic Bias Range (%)**")
+b_col1, b_col2, b_col3 = st.sidebar.columns(3)
+with b_col1: bias_min = st.number_input("Min", value=-30, step=1)
+with b_col2: bias_max = st.number_input("Max", value=30, step=1)
+with b_col3: bias_step = st.number_input("Step", value=5, step=1)
+
+# Generate Bias List (Excluding 0)
+biases = [b for b in range(int(bias_min), int(bias_max) + 1, int(bias_step)) if b != 0]
+st.sidebar.caption(f"Testing Biases: {biases}")
 
 # --- MAIN SCREEN: PHASE 1 DATA INGESTION ---
 st.header("Step 1: Upload & Map Data")
@@ -49,11 +59,7 @@ if uploaded_file:
         with col1: 
             date_col = st.selectbox("Date Column", actual_columns, index=0)
             date_format = st.selectbox("Date Format", [
-                "Auto-detect", 
-                "YYYYMMDDHHMMSS (Dense)", 
-                "YYYY-MM-DD HH:MM:SS", 
-                "DD/MM/YYYY HH:MM:SS", 
-                "MM/DD/YYYY HH:MM:SS"
+                "Auto-detect", "YYYYMMDDHHMMSS (Dense)", "YYYY-MM-DD HH:MM:SS", "DD/MM/YYYY HH:MM:SS", "MM/DD/YYYY HH:MM:SS"
             ])
         with col2: inst_col = st.selectbox("Instrument Column", actual_columns, index=0)
         with col3: test_col = st.selectbox("Test ID Column", actual_columns, index=0)
@@ -61,24 +67,23 @@ if uploaded_file:
 
     st.markdown("---")
     st.header("Step 2: Filter & Gross Cleanse")
-    
     unique_tests = sorted(df_raw[test_col].dropna().astype(str).unique())
     selected_test = st.selectbox("Select Test to Analyze", ["-- Select --"] + unique_tests)
     
     if selected_test != "-- Select --":
         df_test = df_raw[df_raw[test_col].astype(str) == selected_test].copy()
         unique_inst = sorted(df_test[inst_col].dropna().astype(str).unique())
-        selected_inst = st.selectbox("Select Instrument to Analyze", ["-- Select --"] + unique_inst)
         
-        if selected_inst != "-- Select --":
-            df_inst = df_test[df_test[inst_col].astype(str) == selected_inst].copy()
-            
-            st.subheader("Absolute Clinical Limits (Garbage Filter)")
-            st.markdown("Remove obvious artifacts, negative values, and literal analyzer error codes *before* running any simulations.")
+        # MULTI-SELECT UPGRADE
+        selected_insts = st.multiselect("Select Instrument(s) to Analyze", unique_inst, default=unique_inst[0] if len(unique_inst) > 0 else None)
+        
+        if selected_insts:
+            # Filter for multiple instruments
+            df_inst = df_test[df_test[inst_col].astype(str).isin(selected_insts)].copy()
             
             c1, c2 = st.columns(2)
             with c1: gross_min = st.number_input("Minimum Possible Physiological Value", value=0.0)
-            with c2: gross_max = st.number_input("Maximum Possible Physiological Value", value=100.0)
+            with c2: gross_max = st.number_input("Maximum Possible Physiological Value", value=500.0)
             
             if st.button("Apply Gross Cleansing", type="primary"):
                 original_count = len(df_inst)
@@ -86,7 +91,6 @@ if uploaded_file:
                 df_clean = df_inst.dropna(subset=[val_col])
                 df_clean = df_clean[(df_clean[val_col] >= gross_min) & (df_clean[val_col] <= gross_max)]
                 
-                # --- DATE PARSING LOGIC ---
                 if date_format == "YYYYMMDDHHMMSS (Dense)":
                     df_clean[date_col] = pd.to_datetime(df_clean[date_col].astype(str).str.split('.').str[0], format='%Y%m%d%H%M%S', errors='coerce')
                 elif date_format == "YYYY-MM-DD HH:MM:SS":
@@ -103,206 +107,144 @@ if uploaded_file:
                 
                 st.session_state['clean_data'] = df_clean
                 st.session_state['val_col'] = val_col
-                
-                st.success("✅ Data Cleansing Complete!")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Original Rows", original_count)
-                m2.metric("Garbage Rows Dropped", original_count - final_count)
-                m3.metric("Clean Baseline Data", final_count)
+                st.success(f"✅ Data Cleansing Complete! Retained {final_count} pure historical records from {len(selected_insts)} instrument(s).")
 
-# --- PHASE 3, 4, 5 & 6: THE SIMULATION ENGINE AND REPORTING ---
+# --- PHASE 3, 4, & 5: MULTI-WINDOW SIMULATION ENGINE ---
 if 'clean_data' in st.session_state:
     st.markdown("---")
     st.header("Step 3: Run IFCC-Compliant MA Simulations")
     
-    if st.button("🚀 Run Simulation Engine", type="primary"):
-        with st.spinner("Calculating Baseline and Simulating Errors..."):
+    if st.button("🚀 Run Multi-Window Simulation Engine", type="primary"):
+        with st.spinner("Simulating multiple block sizes and calculating limits..."):
             df = st.session_state['clean_data'].copy()
             v_col = st.session_state['val_col']
             
-            # 1. Baseline Profiling (Apply Algorithmic Truncation to normal data)
+            block_sizes = [int(n.strip()) for n in block_sizes_input.split(',')]
+            all_results = []
+            baseline_stats = []
+            
             base_mask = (df[v_col] >= trunc_min) & (df[v_col] <= trunc_max)
             df_trunc = df[base_mask].copy()
             
-            # Calculate Baseline MA Stats
-            if "Simple" in algorithm:
-                baseline_ma = df_trunc[v_col].rolling(window=block_size).mean()
-            elif "Median" in algorithm:
-                baseline_ma = df_trunc[v_col].rolling(window=block_size).median()
-            else:
-                baseline_ma = df_trunc[v_col].ewm(span=block_size, adjust=False).mean()
+            for n in block_sizes:
+                # Calculate Baseline MA Stats for this N (Replicates the Huvaros Cards)
+                if "Simple" in algorithm:
+                    baseline_ma = df_trunc[v_col].rolling(window=n).mean()
+                elif "Median" in algorithm:
+                    baseline_ma = df_trunc[v_col].rolling(window=n).median()
+                else:
+                    baseline_ma = df_trunc[v_col].ewm(span=n, adjust=False).mean()
+                    
+                target_mean = baseline_ma.mean()
+                ma_sd = baseline_ma.std()
+                ucl = target_mean + (control_limit_z * ma_sd)
+                lcl = target_mean - (control_limit_z * ma_sd)
                 
-            target_mean = baseline_ma.mean()
-            ma_sd = baseline_ma.std()
-            ucl = target_mean + (control_limit_z * ma_sd)
-            lcl = target_mean - (control_limit_z * ma_sd)
+                baseline_stats.append({
+                    "Window / Block Size (N)": n,
+                    "Target Mean": f"{target_mean:.3f}",
+                    "Lower Control Limit (LCL)": f"{lcl:.3f}",
+                    "Upper Control Limit (UCL)": f"{ucl:.3f}"
+                })
+                
+                # Run Simulations for this N
+                for bias in biases:
+                    nped_list = []
+                    for _ in range(sim_runs):
+                        safe_start_min = max(n, samples_before)
+                        safe_start_max = len(df) - samples_after
+                        if safe_start_max <= safe_start_min:
+                            continue 
+                            
+                        start_idx = random.randint(safe_start_min, safe_start_max)
+                        sim_vals = df[v_col].values.copy()
+                        sim_vals[start_idx:] = sim_vals[start_idx:] * (1 + (bias / 100.0))
+                        
+                        valid_mask = (sim_vals >= trunc_min) & (sim_vals <= trunc_max)
+                        valid_vals = sim_vals[valid_mask]
+                        
+                        if len(valid_vals) >= n:
+                            valid_series = pd.Series(valid_vals)
+                            if "Simple" in algorithm:
+                                ma_sim = valid_series.rolling(window=n).mean()
+                            elif "Median" in algorithm:
+                                ma_sim = valid_series.rolling(window=n).median()
+                            else:
+                                ma_sim = valid_series.ewm(span=n, adjust=False).mean()
+                            
+                            breach_idx = ma_sim[(ma_sim > ucl) | (ma_sim < lcl)].index
+                            
+                            if len(breach_idx) > 0:
+                                samples_to_detect = int(breach_idx[0] - (start_idx * (len(valid_vals)/len(sim_vals))))
+                                if samples_to_detect > 0:
+                                    nped_list.append(samples_to_detect)
+                    
+                    if nped_list:
+                        all_results.append({
+                            "Block Size (N)": str(n),
+                            "Bias (%)": bias,
+                            "Median NPed": np.median(nped_list),
+                            "Min NPed": np.min(nped_list),
+                            "Max NPed": np.max(nped_list)
+                        })
+
+            # --- VISUALIZATIONS & DATA TABLES ---
+            st.success("✅ Multi-Window Simulations Complete!")
             
-            # 2. Simulation Loop
-            biases = [float(b.strip()) for b in bias_input.split(',')]
-            results_data = []
+            # Display the Control Limits Table (Replicating Huvaros Dashboard Cards)
+            st.subheader("1. Control Limits per Algorithm Window")
+            st.markdown("These are the strict limits calculated from your healthy baseline data. The algorithm uses these fixed thresholds to catch errors.")
+            st.dataframe(pd.DataFrame(baseline_stats), use_container_width=True)
             
+            # Display Bias Impact Table (Answering the user's specific request)
+            st.subheader("2. Bias Impact Analysis (Primary Window)")
+            st.markdown("This table illustrates what happens to the mean when the systematic biases are injected, and confirms if the shift is severe enough to breach the control limits.")
+            primary_n = block_sizes[0]
+            p_mean = float(baseline_stats[0]["Target Mean"])
+            p_lcl = float(baseline_stats[0]["Lower Control Limit (LCL)"])
+            p_ucl = float(baseline_stats[0]["Upper Control Limit (UCL)"])
+            
+            bias_impact_data = []
             for bias in biases:
-                nped_list = []
-                for _ in range(sim_runs):
-                    # Pick a random injection point
-                    start_idx = random.randint(block_size * 2, len(df) - (block_size * 5))
-                    
-                    # Create a simulated shifted array
-                    sim_vals = df[v_col].values.copy()
-                    sim_vals[start_idx:] = sim_vals[start_idx:] * (1 + (bias / 100.0))
-                    
-                    # IFCC RULE: Apply truncation limits AFTER bias is injected
-                    valid_mask = (sim_vals >= trunc_min) & (sim_vals <= trunc_max)
-                    valid_vals = sim_vals[valid_mask]
-                    
-                    # Calculate MA on the truncated shifted data
-                    if len(valid_vals) >= block_size:
-                        valid_series = pd.Series(valid_vals)
-                        if "Simple" in algorithm:
-                            ma_sim = valid_series.rolling(window=block_size).mean()
-                        elif "Median" in algorithm:
-                            ma_sim = valid_series.rolling(window=block_size).median()
-                        else:
-                            ma_sim = valid_series.ewm(span=block_size, adjust=False).mean()
-                        
-                        # Find the first index where MA breaches UCL or LCL
-                        breach_idx = ma_sim[(ma_sim > ucl) | (ma_sim < lcl)].index
-                        
-                        # Calculate NPed (Samples to detection)
-                        if len(breach_idx) > 0:
-                            # Rough estimation of total samples (including truncated) elapsed
-                            samples_to_detect = int(breach_idx[0] - (start_idx * (len(valid_vals)/len(sim_vals))))
-                            if samples_to_detect > 0:
-                                nped_list.append(samples_to_detect)
-                
-                # Aggregate results for this bias
-                if nped_list:
-                    results_data.append({
-                        "Bias (%)": bias,
-                        "Median NPed": np.median(nped_list),
-                        "Max NPed": np.max(nped_list),
-                        "Min NPed": np.min(nped_list)
-                    })
+                shifted_mean = p_mean * (1 + (bias / 100.0))
+                will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No (Shift too small) 🟢"
+                bias_impact_data.append({
+                    "Injected Bias Limit (%)": f"{bias}%",
+                    "Shifted Theoretical Mean": f"{shifted_mean:.3f}",
+                    "Fixed LCL": f"{p_lcl:.3f}",
+                    "Fixed UCL": f"{p_ucl:.3f}",
+                    "Breaches Limits?": will_alarm
+                })
+            st.dataframe(pd.DataFrame(bias_impact_data), use_container_width=True)
 
-            # --- PHASE 5: VISUALIZATION ---
-            st.success("Simulations Complete!")
-            
-            res_df = pd.DataFrame()
-            if results_data:
-                res_df = pd.DataFrame(results_data).sort_values("Bias (%)")
-                
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=res_df["Bias (%)"],
-                    y=res_df["Median NPed"],
-                    name='Median NPed',
-                    error_y=dict(
-                        type='data',
-                        symmetric=False,
-                        array=res_df["Max NPed"] - res_df["Median NPed"],
-                        arrayminus=res_df["Median NPed"] - res_df["Min NPed"],
-                        visible=True
-                    ),
-                    marker_color='royalblue'
-                ))
-                
-                fig.update_layout(
-                    title="MA Validation Chart (Bias vs. Samples to Detection)",
-                    xaxis_title="Systematic Error / Bias (%)",
-                    yaxis_title="Patient Results Needed for Error Detection",
-                    template="plotly_white"
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-            # Display Metrics Summary
-            st.subheader("Baseline AON Metrics")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Target Mean", f"{target_mean:.3f}")
-            m2.metric("Upper Control Limit (UCL)", f"{ucl:.3f}")
-            m3.metric("Lower Control Limit (LCL)", f"{lcl:.3f}")
-
-            # --- PHASE 6: IFCC COMPLIANT PDF REPORT GENERATION ---
+            # Draw the Plotly Charts
+            res_df = pd.DataFrame(all_results)
             if not res_df.empty:
-                st.markdown("---")
-                st.header("Step 4: Export Validation Report")
-                st.markdown("Generate an IFCC-compliant documentation report for your laboratory Quality Management System.")
+                st.subheader("3. Error Detection Performance")
+                col1, col2 = st.columns([2, 1])
                 
-                # Function to generate PDF
-                def create_pdf(org, assay, unit_label, algo, n, t_min, t_max, z, mean, sd, u_lim, l_lim, results_df):
-                    pdf = FPDF()
-                    pdf.add_page()
-                    
-                    # Header
-                    pdf.set_font("helvetica", 'B', 16)
-                    pdf.cell(0, 10, "PBRTQC / AON Performance Verification Report", ln=True, align='C')
-                    pdf.ln(5)
-                    
-                    # Section 1: Metadata
-                    pdf.set_font("helvetica", 'B', 12)
-                    pdf.cell(0, 10, "1. Report Metadata", ln=True)
-                    pdf.set_font("helvetica", '', 11)
-                    pdf.cell(0, 8, f"Organization / Laboratory: {org}", ln=True)
-                    pdf.cell(0, 8, f"Assay: {assay}", ln=True)
-                    pdf.cell(0, 8, f"Unit: {unit_label}", ln=True)
-                    pdf.ln(5)
-                    
-                    # Section 2: AON Parameters
-                    pdf.set_font("helvetica", 'B', 12)
-                    pdf.cell(0, 10, "2. Selected AON Parameters", ln=True)
-                    pdf.set_font("helvetica", '', 11)
-                    pdf.cell(0, 8, f"Algorithm: {algo}", ln=True)
-                    pdf.cell(0, 8, f"Block Size (N): {n}", ln=True)
-                    pdf.cell(0, 8, f"Lower Truncation Limit: {t_min} {unit_label}", ln=True)
-                    pdf.cell(0, 8, f"Upper Truncation Limit: {t_max} {unit_label}", ln=True)
-                    pdf.ln(5)
-                    
-                    # Section 3: Baseline Statistics
-                    pdf.set_font("helvetica", 'B', 12)
-                    pdf.cell(0, 10, "3. Baseline Statistics & Control Limits", ln=True)
-                    pdf.set_font("helvetica", '', 11)
-                    pdf.cell(0, 8, f"Target Mean: {mean:.3f} {unit_label}", ln=True)
-                    pdf.cell(0, 8, f"Moving Average Standard Deviation: {sd:.3f}", ln=True)
-                    pdf.cell(0, 8, f"Control Limit Z-Score: {z}", ln=True)
-                    pdf.cell(0, 8, f"Lower Control Limit (LCL): {l_lim:.3f} {unit_label}", ln=True)
-                    pdf.cell(0, 8, f"Upper Control Limit (UCL): {u_lim:.3f} {unit_label}", ln=True)
-                    pdf.ln(5)
-                    
-                    # Section 4: Simulation Results
-                    pdf.set_font("helvetica", 'B', 12)
-                    pdf.cell(0, 10, "4. Simulation Error Detection Results (ANPed)", ln=True)
-                    pdf.set_font("helvetica", 'I', 10)
-                    pdf.cell(0, 8, "Number of patient results affected before error detection (Median & 95th Percentile range)", ln=True)
-                    pdf.set_font("helvetica", '', 10)
-                    
-                    # Simple Table Header
-                    pdf.set_font("helvetica", 'B', 10)
-                    pdf.cell(40, 8, "Injected Bias (%)", border=1)
-                    pdf.cell(40, 8, "Median NPed", border=1)
-                    pdf.cell(40, 8, "Min NPed", border=1)
-                    pdf.cell(40, 8, "Max NPed", border=1, ln=True)
-                    
-                    # Table Data
-                    pdf.set_font("helvetica", '', 10)
-                    for index, row in results_df.iterrows():
-                        pdf.cell(40, 8, f"{row['Bias (%)']}%", border=1)
-                        pdf.cell(40, 8, f"{row['Median NPed']:.0f}", border=1)
-                        pdf.cell(40, 8, f"{row['Min NPed']:.0f}", border=1)
-                        pdf.cell(40, 8, f"{row['Max NPed']:.0f}", border=1, ln=True)
-                    
-                    # Output PDF as bytearray
-                    return pdf.output()
-
-                # Generate the PDF bytes
-                pdf_bytes = create_pdf(org_name, assay_name, unit, algorithm, block_size, 
-                                       trunc_min, trunc_max, control_limit_z, 
-                                       target_mean, ma_sd, ucl, lcl, res_df)
+                with col1:
+                    fig_line = px.line(
+                        res_df, x="Bias (%)", y="Median NPed", color="Block Size (N)", markers=True,
+                        title="Bias Detection Curves (Comparing Block Sizes)",
+                        labels={"Median NPed": "Results needed for bias detection"}
+                    )
+                    fig_line.update_layout(template="plotly_white", yaxis=dict(range=[0, min(100, res_df["Median NPed"].max() + 10)]))
+                    st.plotly_chart(fig_line, use_container_width=True)
                 
-                # Streamlit Download Button
-                st.download_button(
-                    label="📄 Download IFCC Compliance Report (PDF)",
-                    data=bytes(pdf_bytes),
-                    file_name=f"AON_Report_{assay_name.replace(' ', '_')}.pdf",
-                    mime="application/pdf",
-                    type="primary"
-                )
+                with col2:
+                    primary_df = res_df[res_df["Block Size (N)"] == str(primary_n)].sort_values("Bias (%)")
+                    fig_bar = go.Figure()
+                    fig_bar.add_trace(go.Bar(
+                        x=primary_df["Bias (%)"], y=primary_df["Median NPed"],
+                        name=f'N={primary_n}',
+                        error_y=dict(
+                            type='data', symmetric=False,
+                            array=primary_df["Max NPed"] - primary_df["Median NPed"],
+                            arrayminus=primary_df["Median NPed"] - primary_df["Min NPed"],
+                            visible=True
+                        ),
+                        marker_color='royalblue'
+                    ))
+                    fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white")
+                    st.plotly_chart(fig_bar, use_container_width=True)
