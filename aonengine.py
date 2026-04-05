@@ -20,6 +20,10 @@ unit = st.sidebar.text_input("Unit", value="U/L")
 st.sidebar.markdown("---")
 st.sidebar.header("📐 2. AON Parameters")
 algorithm = st.sidebar.selectbox("Algorithm", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
+
+# NEW: Operating Mode (Continuous vs Binning)
+operating_mode = st.sidebar.radio("Operating Mode / Grouping Period", ["Continuous (Rolling)", "Batch (Binning)"])
+
 st.sidebar.caption("Compare multiple block sizes simultaneously (comma-separated):")
 block_sizes_input = st.sidebar.text_input("Block Sizes / Windows (N)", value="10, 25, 50, 100")
 
@@ -74,11 +78,9 @@ if uploaded_file:
         df_test = df_raw[df_raw[test_col].astype(str) == selected_test].copy()
         unique_inst = sorted(df_test[inst_col].dropna().astype(str).unique())
         
-        # MULTI-SELECT UPGRADE
         selected_insts = st.multiselect("Select Instrument(s) to Analyze", unique_inst, default=unique_inst[0] if len(unique_inst) > 0 else None)
         
         if selected_insts:
-            # Filter for multiple instruments
             df_inst = df_test[df_test[inst_col].astype(str).isin(selected_insts)].copy()
             
             c1, c2 = st.columns(2)
@@ -127,13 +129,17 @@ if 'clean_data' in st.session_state:
             df_trunc = df[base_mask].copy()
             
             for n in block_sizes:
-                # Calculate Baseline MA Stats for this N (Replicates the Huvaros Cards)
+                # 1. Calculate Baseline MA Stats
                 if "Simple" in algorithm:
                     baseline_ma = df_trunc[v_col].rolling(window=n).mean()
                 elif "Median" in algorithm:
                     baseline_ma = df_trunc[v_col].rolling(window=n).median()
                 else:
                     baseline_ma = df_trunc[v_col].ewm(span=n, adjust=False).mean()
+                
+                # Apply Binning Logic if Batch Mode is selected
+                if operating_mode == "Batch (Binning)":
+                    baseline_ma = baseline_ma[n-1::n] # Slices the data to only keep the end of each discrete bin
                     
                 target_mean = baseline_ma.mean()
                 ma_sd = baseline_ma.std()
@@ -147,7 +153,7 @@ if 'clean_data' in st.session_state:
                     "Upper Control Limit (UCL)": f"{ucl:.3f}"
                 })
                 
-                # Run Simulations for this N
+                # 2. Run Simulations for this N
                 for bias in biases:
                     nped_list = []
                     for _ in range(sim_runs):
@@ -172,6 +178,10 @@ if 'clean_data' in st.session_state:
                             else:
                                 ma_sim = valid_series.ewm(span=n, adjust=False).mean()
                             
+                            # Apply Binning Logic to the simulation
+                            if operating_mode == "Batch (Binning)":
+                                ma_sim = ma_sim[n-1::n]
+                                
                             breach_idx = ma_sim[(ma_sim > ucl) | (ma_sim < lcl)].index
                             
                             if len(breach_idx) > 0:
@@ -191,14 +201,11 @@ if 'clean_data' in st.session_state:
             # --- VISUALIZATIONS & DATA TABLES ---
             st.success("✅ Multi-Window Simulations Complete!")
             
-            # Display the Control Limits Table (Replicating Huvaros Dashboard Cards)
             st.subheader("1. Control Limits per Algorithm Window")
-            st.markdown("These are the strict limits calculated from your healthy baseline data. The algorithm uses these fixed thresholds to catch errors.")
+            st.markdown(f"Mode: **{operating_mode}**")
             st.dataframe(pd.DataFrame(baseline_stats), use_container_width=True)
             
-            # Display Bias Impact Table (Answering the user's specific request)
             st.subheader("2. Bias Impact Analysis (Primary Window)")
-            st.markdown("This table illustrates what happens to the mean when the systematic biases are injected, and confirms if the shift is severe enough to breach the control limits.")
             primary_n = block_sizes[0]
             p_mean = float(baseline_stats[0]["Target Mean"])
             p_lcl = float(baseline_stats[0]["Lower Control Limit (LCL)"])
@@ -217,7 +224,6 @@ if 'clean_data' in st.session_state:
                 })
             st.dataframe(pd.DataFrame(bias_impact_data), use_container_width=True)
 
-            # Draw the Plotly Charts
             res_df = pd.DataFrame(all_results)
             if not res_df.empty:
                 st.subheader("3. Error Detection Performance")
