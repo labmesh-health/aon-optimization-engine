@@ -1,0 +1,18 @@
+# Ignore raw laboratory data to protect PHI/confidentiality
+*.csv
+*.xlsx
+*.txt
+
+# Ignore virtual environments
+venv/
+env/
+.venv/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Ignore OS system files
+.DS_Store
+Thumbs.db
