@@ -106,8 +106,8 @@ else:
             block_sizes_input = st.text_input("Block Sizes (comma-separated)", value="10, 25, 50, 100")
             
             c_trunc1, c_trunc2 = st.columns(2)
-            with c_trunc1: trunc_min = st.number_input("Lower Trunc", value=18.0, step=0.1)
-            with c_trunc2: trunc_max = st.number_input("Upper Trunc", value=45.0, step=0.1)
+            with c_trunc1: trunc_min = st.number_input("Lower Truncation Limit", value=18.0, step=0.1)
+            with c_trunc2: trunc_max = st.number_input("Upper Truncation Limit", value=45.0, step=0.1)
             control_limit_z = st.number_input("Z-Score Multiplier (Control Limits)", value=3.0, step=0.1)
 
         with col_sim:
@@ -191,10 +191,15 @@ else:
                             if operating_mode == "Batch (Binning)":
                                 ma_sim = ma_sim[n-1::n]
                                 
-                            breach_idx = ma_sim[(ma_sim > ucl) | (ma_sim < lcl)].index
+                            # Calculate the exact index in the truncated array where the bias starts
+                            trunc_start_idx = valid_mask[:start_idx].sum()
                             
-                            if len(breach_idx) > 0:
-                                samples_to_detect = int(breach_idx[0] - (start_idx * (len(valid_vals)/len(sim_vals))))
+                            # Only look for breaches that happen AFTER the bias was injected
+                            ma_post_injection = ma_sim[ma_sim.index >= trunc_start_idx]
+                            breaches = ma_post_injection[(ma_post_injection > ucl) | (ma_post_injection < lcl)].index
+                            
+                            if len(breaches) > 0:
+                                samples_to_detect = int(breaches[0] - trunc_start_idx)
                                 if samples_to_detect > 0:
                                     nped_list.append(samples_to_detect)
                     
@@ -210,7 +215,7 @@ else:
             # --- RENDER RESULTS UI ---
             st.markdown("---")
             
-            # Huvaros-Style Baseline Cards
+            # Baseline Cards
             st.subheader("📊 Baseline Limits per Window")
             card_cols = st.columns(len(baseline_stats))
             for i, stat in enumerate(baseline_stats):
@@ -220,7 +225,7 @@ else:
             
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # Tabbed Interface for Clean UX
+            # Tabbed Interface
             tab_charts, tab_data, tab_report = st.tabs(["📈 Interactive Charts", "📋 Data Tables", "📄 Export PDF Report"])
             res_df = pd.DataFrame(all_results)
             
@@ -317,14 +322,15 @@ else:
                         pdf.cell(40, 8, f"{row['Max NPed']:.0f}", border=1, ln=True)
                     return pdf.output()
 
-                pdf_bytes = create_pdf(org_name, assay_name, unit, algorithm, primary_stat['Block Size (N)'], 
-                                       trunc_min, trunc_max, control_limit_z, 
-                                       primary_stat['Target Mean'], primary_stat['UCL'], primary_stat['LCL'], primary_df)
-                
-                st.download_button(
-                    label="📄 Download IFCC Report (PDF)",
-                    data=bytes(pdf_bytes),
-                    file_name=f"AON_Report_{assay_name.replace(' ', '_')}.pdf",
-                    mime="application/pdf",
-                    type="primary"
-                )
+                if not res_df.empty:
+                    pdf_bytes = create_pdf(org_name, assay_name, unit, algorithm, primary_stat['Block Size (N)'], 
+                                           trunc_min, trunc_max, control_limit_z, 
+                                           primary_stat['Target Mean'], primary_stat['UCL'], primary_stat['LCL'], primary_df)
+                    
+                    st.download_button(
+                        label="📄 Download IFCC Report (PDF)",
+                        data=bytes(pdf_bytes),
+                        file_name=f"AON_Report_{assay_name.replace(' ', '_')}.pdf",
+                        mime="application/pdf",
+                        type="primary"
+                    )
