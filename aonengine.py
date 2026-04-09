@@ -115,6 +115,22 @@ else:
             c_sim1, c_sim2 = st.columns(2)
             with c_sim1: samples_before = st.number_input("Samples Before", value=150, step=10)
             with c_sim2: samples_after = st.number_input("Samples After", value=500, step=10)
+            
+            # --- DYNAMIC RECOMMENDATION LOGIC ---
+            try:
+                max_n = max([int(n.strip()) for n in block_sizes_input.split(',') if n.strip().isdigit()])
+            except:
+                max_n = 50
+                
+            ideal_after = max_n * 5
+            total_rows = len(st.session_state['clean_data'])
+            
+            if ideal_after > (total_rows * 0.4):
+                ideal_after = int(total_rows * 0.4)
+                
+            st.caption(f"💡 **Tip:** Set 'Samples After' to at least **{ideal_after}** (based on max N={max_n} and your {total_rows}-row dataset) to ensure the simulation has enough runway.")
+            # ------------------------------------
+
             sim_runs = st.number_input("Simulations per Bias", min_value=5, max_value=100, value=20)
             
             st.markdown("**Bias Range (%)**")
@@ -163,7 +179,7 @@ else:
                     "UCL": ucl
                 })
                 
-                # --- NEW: DYNAMIC PRE-FLIGHT WARNING ---
+                # --- PRE-FLIGHT WARNING ---
                 max_bias_pct = max([abs(b) for b in biases]) / 100.0
                 max_theoretical_shift = target_mean * max_bias_pct
                 distance_to_ucl = ucl - target_mean
