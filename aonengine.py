@@ -106,15 +106,15 @@ else:
             block_sizes_input = st.text_input("Block Sizes (comma-separated)", value="10, 25, 50, 100")
             
             c_trunc1, c_trunc2 = st.columns(2)
-            with c_trunc1: trunc_min = st.number_input("Lower Truncation Limit", value=18.0, step=0.1)
-            with c_trunc2: trunc_max = st.number_input("Upper Truncation Limit", value=45.0, step=0.1)
-            control_limit_z = st.number_input("Z-Score Multiplier (Control Limits)", value=3.0, step=0.1)
+            with c_trunc1: trunc_min = st.number_input("Lower Truncation Limit", value=5.0, step=0.1)
+            with c_trunc2: trunc_max = st.number_input("Upper Truncation Limit", value=60.0, step=0.1)
+            control_limit_z = st.number_input("Z-Score Multiplier", value=3.0, step=0.1)
 
         with col_sim:
             st.markdown("##### 🎯 Simulation Settings")
             c_sim1, c_sim2 = st.columns(2)
             with c_sim1: samples_before = st.number_input("Samples Before", value=150, step=10)
-            with c_sim2: samples_after = st.number_input("Samples After", value=150, step=10)
+            with c_sim2: samples_after = st.number_input("Samples After", value=500, step=10)
             sim_runs = st.number_input("Simulations per Bias", min_value=5, max_value=100, value=20)
             
             st.markdown("**Bias Range (%)**")
@@ -163,6 +163,20 @@ else:
                     "UCL": ucl
                 })
                 
+                # --- NEW: DYNAMIC PRE-FLIGHT WARNING ---
+                max_bias_pct = max([abs(b) for b in biases]) / 100.0
+                max_theoretical_shift = target_mean * max_bias_pct
+                distance_to_ucl = ucl - target_mean
+                
+                if max_theoretical_shift < distance_to_ucl:
+                    st.warning(f"""
+                    ⚠️ **Pre-Flight Warning for Block Size N={n}: Your Truncation Limits are too wide!**
+                    * **Baseline Noise (Distance to Control Limit):** {distance_to_ucl:.2f}
+                    * **Max Error Shift (Mean × Max Bias):** {max_theoretical_shift:.2f}
+                    
+                    *The simulated error is mathematically invisible to the algorithm. Lower your Upper Truncation Limit to shrink the baseline noise.*
+                    """)
+                
                 # 2. Run Simulations
                 for bias in biases:
                     nped_list = []
@@ -191,10 +205,10 @@ else:
                             if operating_mode == "Batch (Binning)":
                                 ma_sim = ma_sim[n-1::n]
                                 
-                            # Calculate the exact index in the truncated array where the bias starts
+                            # Calculate exact index where bias starts in truncated array
                             trunc_start_idx = valid_mask[:start_idx].sum()
                             
-                            # Only look for breaches that happen AFTER the bias was injected
+                            # Search for breaches AFTER injection
                             ma_post_injection = ma_sim[ma_sim.index >= trunc_start_idx]
                             breaches = ma_post_injection[(ma_post_injection > ucl) | (ma_post_injection < lcl)].index
                             
@@ -238,7 +252,8 @@ else:
                             title="Bias Detection Curves (All Block Sizes)",
                             labels={"Median NPed": "Results needed for bias detection"}
                         )
-                        fig_line.update_layout(template="plotly_white", yaxis=dict(range=[0, min(100, res_df["Median NPed"].max() + 10)]))
+                        # Auto-scales Y-axis (Removed clamping code)
+                        fig_line.update_layout(template="plotly_white")
                         st.plotly_chart(fig_line, use_container_width=True)
                     
                     with c_chart2:
@@ -263,23 +278,24 @@ else:
                 st.markdown("#### Bias Impact Analysis")
                 st.markdown("Theoretical shifts for the primary window to confirm if limits are breached.")
                 
-                primary_stat = baseline_stats[0]
-                p_mean = primary_stat["Target Mean"]
-                p_lcl = primary_stat["LCL"]
-                p_ucl = primary_stat["UCL"]
-                
-                bias_impact_data = []
-                for bias in biases:
-                    shifted_mean = p_mean * (1 + (bias / 100.0))
-                    will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No 🟢"
-                    bias_impact_data.append({
-                        "Bias (%)": f"{bias}%",
-                        "Shifted Mean": f"{shifted_mean:.3f}",
-                        "LCL": f"{p_lcl:.3f}",
-                        "UCL": f"{p_ucl:.3f}",
-                        "Breaches Limits?": will_alarm
-                    })
-                st.dataframe(pd.DataFrame(bias_impact_data), use_container_width=True)
+                if len(baseline_stats) > 0:
+                    primary_stat = baseline_stats[0]
+                    p_mean = primary_stat["Target Mean"]
+                    p_lcl = primary_stat["LCL"]
+                    p_ucl = primary_stat["UCL"]
+                    
+                    bias_impact_data = []
+                    for bias in biases:
+                        shifted_mean = p_mean * (1 + (bias / 100.0))
+                        will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No 🟢"
+                        bias_impact_data.append({
+                            "Bias (%)": f"{bias}%",
+                            "Shifted Mean": f"{shifted_mean:.3f}",
+                            "LCL": f"{p_lcl:.3f}",
+                            "UCL": f"{p_ucl:.3f}",
+                            "Breaches Limits?": will_alarm
+                        })
+                    st.dataframe(pd.DataFrame(bias_impact_data), use_container_width=True)
 
             with tab_report:
                 st.markdown("#### Generate IFCC Compliance Report")
@@ -322,7 +338,7 @@ else:
                         pdf.cell(40, 8, f"{row['Max NPed']:.0f}", border=1, ln=True)
                     return pdf.output()
 
-                if not res_df.empty:
+                if not res_df.empty and len(baseline_stats) > 0:
                     pdf_bytes = create_pdf(org_name, assay_name, unit, algorithm, primary_stat['Block Size (N)'], 
                                            trunc_min, trunc_max, control_limit_z, 
                                            primary_stat['Target Mean'], primary_stat['UCL'], primary_stat['LCL'], primary_df)
