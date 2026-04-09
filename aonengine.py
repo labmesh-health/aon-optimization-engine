@@ -4,12 +4,16 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 import random
+import os
+import tempfile
 from fpdf import FPDF
+from PIL import Image
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AON Optimization Engine", layout="wide", initial_sidebar_state="expanded")
+# --- PAGE CONFIGURATION & BRANDING ---
+APP_NAME = "LabMesh AON Formatter"
+st.set_page_config(page_title=APP_NAME, layout="wide", initial_sidebar_state="expanded")
 
-# --- CUSTOM CSS FOR METRIC CARDS ---
+# --- CUSTOM CSS FOR DASHBOARD UX ---
 st.markdown("""
     <style>
     div[data-testid="metric-container"] {
@@ -18,8 +22,87 @@ st.markdown("""
         padding: 5% 5% 5% 10%;
         border-radius: 5px;
     }
+    div.stButton > button {
+        background-color: #004b7d;
+        color: white;
+        border-radius: 5px;
+        transition: 0.3s;
+    }
+    div.stButton > button:hover {
+        background-color: #0060a0;
+        color: white;
+    }
     </style>
     """, unsafe_allow_html=True)
+
+# --- BRANDING HEADER ---
+# Ensure your logo file (e.g., 'logo.png') is in the same directory as this script.
+try:
+    logo_img = Image.open("logo.png")
+    col1, col2 = st.columns([1, 8])
+    with col1:
+        st.image(logo_img, width=80)
+    with col2:
+        st.title(APP_NAME)
+except FileNotFoundError:
+    st.title(f"🧪 {APP_NAME}")
+    st.caption("*(Note: 'logo.png' not found in directory. Add it to display the LabMesh logo here.)*")
+
+st.markdown("Build, validate, and document patient-based real-time quality control parameters.")
+st.markdown("---")
+
+# ==========================================
+# SUBCLASS FPDF FOR PROFESSIONAL REPORTS
+# ==========================================
+PROFESSIONAL_BLUE = (0, 75, 125)
+LIGHT_BLUE_BG = (220, 240, 250)
+INTERPRETATION_COLORS = {"Breach": (150, 0, 0), "Green": (0, 150, 0), "Grey": (150, 150, 150)}
+
+class PDFReport(FPDF):
+    def __init__(self, org_name, assay, unit, algorithm_type, grouping_mode, logo_path=None):
+        super().__init__()
+        self.org_name = org_name
+        self.assay = assay
+        self.unit = unit
+        self.algorithm_type = algorithm_type
+        self.grouping_mode = grouping_mode
+        self.logo_path = logo_path
+        self.set_auto_page_break(auto=True, margin=15)
+        self.alias_nb_pages()
+        self.set_fill_color(*LIGHT_BLUE_BG) 
+        self.set_draw_color(0, 0, 0) 
+
+    def header(self):
+        if self.logo_path and os.path.exists(self.logo_path):
+            self.image(self.logo_path, 10, 8, 30) 
+        else:
+             self.set_draw_color(*INTERPRETATION_COLORS["Grey"])
+             self.rect(10, 8, 30, 20)
+             self.set_xy(11, 10)
+             self.set_font("helvetica", 'I', 8)
+             self.cell(28, 16, "LabMesh Logo", align='C')
+             self.set_text_color(0)
+             self.set_draw_color(0) 
+
+        self.set_font("helvetica", 'B', 12)
+        self.set_text_color(*PROFESSIONAL_BLUE)
+        self.set_xy(10, 8) 
+        self.cell(0, 10, self.org_name, ln=True, align='R')
+        self.set_font("helvetica", 'B', 20)
+        self.set_text_color(0)
+        self.cell(0, 15, f"{APP_NAME}: Verification Report", ln=True, align='C')
+        self.set_font("helvetica", 'I', 10)
+        now = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.cell(0, 8, f"Report Generated: {now}", ln=True, align='R')
+        self.ln(5)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("helvetica", 'I', 8)
+        self.set_text_color(*INTERPRETATION_COLORS["Grey"])
+        self.cell(0, 10, "© 2026 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", ln=True, align='C')
+        self.set_x(-20)
+        self.cell(20, 10, f"Page {self.page_no()}/{{nb}}", ln=True, align='R')
 
 # ==========================================
 # SIDEBAR: PHASE 1 - DATA INGESTION & PREP
@@ -84,11 +167,8 @@ if uploaded_file:
 # MAIN CANVAS: DASHBOARD & SIMULATION
 # ==========================================
 if 'clean_data' not in st.session_state:
-    st.title("⚙️ PBRTQC Optimization Engine")
     st.info("👈 Please upload and cleanse your data in the sidebar to unlock the dashboard.")
 else:
-    st.title("🎛️ AON Simulation Dashboard")
-    
     # --- CONFIGURATION SECTION ---
     with st.expander("🛠️ Simulation & AON Configurations", expanded=True):
         col_meta, col_aon, col_sim = st.columns(3)
@@ -285,7 +365,7 @@ else:
                                 arrayminus=primary_df["Median NPed"] - primary_df["Min NPed"],
                                 visible=True
                             ),
-                            marker_color='royalblue'
+                            marker_color='#004b7d' # Updated to LabMesh Blue
                         ))
                         fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white")
                         st.plotly_chart(fig_bar, use_container_width=True)
@@ -317,52 +397,62 @@ else:
                 st.markdown("#### Generate IFCC Compliance Report")
                 st.info("Exports parameters and data for the primary block size selected.")
                 
-                def create_pdf(org, assay, unit_label, algo, n, t_min, t_max, z, mean, u_lim, l_lim, results_df):
-                    pdf = FPDF()
-                    pdf.add_page()
-                    pdf.set_font("helvetica", 'B', 16)
-                    pdf.cell(0, 10, "PBRTQC / AON Performance Verification Report", ln=True, align='C')
-                    pdf.ln(5)
-                    
-                    pdf.set_font("helvetica", 'B', 12)
-                    pdf.cell(0, 10, "1. Metadata & Parameters", ln=True)
-                    pdf.set_font("helvetica", '', 11)
-                    pdf.cell(0, 8, f"Lab: {org} | Assay: {assay} ({unit_label})", ln=True)
-                    pdf.cell(0, 8, f"Algorithm: {algo} | Block Size (N): {n}", ln=True)
-                    pdf.cell(0, 8, f"Truncation Limits: {t_min} to {t_max} | Z-Score: {z}", ln=True)
-                    pdf.ln(5)
-                    
-                    pdf.set_font("helvetica", 'B', 12)
-                    pdf.cell(0, 10, "2. Baseline Statistics", ln=True)
-                    pdf.set_font("helvetica", '', 11)
-                    pdf.cell(0, 8, f"Target Mean: {mean:.3f} | LCL: {l_lim:.3f} | UCL: {u_lim:.3f}", ln=True)
-                    pdf.ln(5)
-                    
-                    pdf.set_font("helvetica", 'B', 12)
-                    pdf.cell(0, 10, "3. Simulation Error Detection Results (ANPed)", ln=True)
-                    pdf.set_font("helvetica", 'B', 10)
-                    pdf.cell(40, 8, "Bias (%)", border=1)
-                    pdf.cell(40, 8, "Median NPed", border=1)
-                    pdf.cell(40, 8, "Min NPed", border=1)
-                    pdf.cell(40, 8, "Max NPed", border=1, ln=True)
-                    
-                    pdf.set_font("helvetica", '', 10)
-                    for _, row in results_df.iterrows():
-                        pdf.cell(40, 8, f"{row['Bias (%)']}%", border=1)
-                        pdf.cell(40, 8, f"{row['Median NPed']:.0f}", border=1)
-                        pdf.cell(40, 8, f"{row['Min NPed']:.0f}", border=1)
-                        pdf.cell(40, 8, f"{row['Max NPed']:.0f}", border=1, ln=True)
-                    return pdf.output()
-
                 if not res_df.empty and len(baseline_stats) > 0:
-                    pdf_bytes = create_pdf(org_name, assay_name, unit, algorithm, primary_stat['Block Size (N)'], 
-                                           trunc_min, trunc_max, control_limit_z, 
-                                           primary_stat['Target Mean'], primary_stat['UCL'], primary_stat['LCL'], primary_df)
+                     # Create the PDF object
+                    pdf = PDFReport(org_name, assay_name, unit, algorithm, operating_mode, logo_path="logo.png")
+                    pdf.add_page()
+                    
+                    # Section 1: Parameters
+                    pdf.set_font("helvetica", 'B', 12)
+                    pdf.set_text_color(*PROFESSIONAL_BLUE)
+                    pdf.cell(0, 10, "1. AON Parameters", ln=True)
+                    pdf.set_text_color(0)
+                    pdf.set_font("helvetica", '', 11)
+                    pdf.cell(0, 8, f"Block Size (N): {primary_stat['Block Size (N)']}", ln=True)
+                    pdf.cell(0, 8, f"Truncation Limits: {trunc_min} to {trunc_max} {unit}", ln=True)
+                    pdf.cell(0, 8, f"Z-Score: {control_limit_z}", ln=True)
+                    pdf.ln(5)
+                    
+                    # Section 2: Baseline Stats
+                    pdf.set_font("helvetica", 'B', 12)
+                    pdf.set_text_color(*PROFESSIONAL_BLUE)
+                    pdf.cell(0, 10, "2. Baseline Statistics", ln=True)
+                    pdf.set_text_color(0)
+                    pdf.set_font("helvetica", '', 11)
+                    pdf.cell(0, 8, f"Target Mean: {primary_stat['Target Mean']:.3f} {unit}", ln=True)
+                    pdf.cell(0, 8, f"Lower Control Limit (LCL): {primary_stat['LCL']:.3f} {unit}", ln=True)
+                    pdf.cell(0, 8, f"Upper Control Limit (UCL): {primary_stat['UCL']:.3f} {unit}", ln=True)
+                    pdf.ln(5)
+                    
+                    # Section 3: Data Table with Header Color
+                    pdf.set_font("helvetica", 'B', 12)
+                    pdf.set_text_color(*PROFESSIONAL_BLUE)
+                    pdf.cell(0, 10, "3. Error Detection Results (ANPed)", ln=True)
+                    
+                    # Table Header - Colored
+                    pdf.set_font("helvetica", 'B', 10)
+                    pdf.set_fill_color(*PROFESSIONAL_BLUE)
+                    pdf.set_text_color(255, 255, 255) # White text
+                    pdf.cell(40, 8, "Bias (%)", border=1, align='C', fill=True)
+                    pdf.cell(40, 8, "Median NPed", border=1, align='C', fill=True)
+                    pdf.cell(40, 8, "Min NPed", border=1, align='C', fill=True)
+                    pdf.cell(40, 8, "Max NPed", border=1, align='C', fill=True, ln=True)
+                    
+                    # Table Data - Normal
+                    pdf.set_font("helvetica", '', 10)
+                    pdf.set_text_color(0) # Back to black text
+                    for _, row in primary_df.iterrows():
+                        pdf.cell(40, 8, f"{row['Bias (%)']}%", border=1, align='C')
+                        pdf.cell(40, 8, f"{row['Median NPed']:.0f}", border=1, align='C')
+                        pdf.cell(40, 8, f"{row['Min NPed']:.0f}", border=1, align='C')
+                        pdf.cell(40, 8, f"{row['Max NPed']:.0f}", border=1, align='C', ln=True)
+                        
+                    pdf_bytes = pdf.output()
                     
                     st.download_button(
-                        label="📄 Download IFCC Report (PDF)",
+                        label="📄 Download LabMesh Verification Report (PDF)",
                         data=bytes(pdf_bytes),
-                        file_name=f"AON_Report_{assay_name.replace(' ', '_')}.pdf",
+                        file_name=f"LabMesh_AON_Report_{assay_name.replace(' ', '_')}.pdf",
                         mime="application/pdf",
                         type="primary"
                     )
