@@ -89,7 +89,7 @@ class PDFReport(FPDF):
         self.set_y(-15)
         self.set_font("helvetica", 'I', 8)
         self.set_text_color(*INTERPRETATION_COLORS["Grey"])
-        self.cell(0, 10, "© 2026 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", ln=True, align='C')
+        self.cell(0, 10, "© 2024 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", ln=True, align='C')
         self.set_x(-20)
         self.cell(20, 10, f"Page {self.page_no()}/{{nb}}", ln=True, align='R')
 
@@ -232,20 +232,47 @@ class PDFReport(FPDF):
 st.sidebar.title("📂 1. Data Ingestion")
 st.sidebar.markdown("Upload and cleanse your historical data first.")
 
-uploaded_file = st.sidebar.file_uploader("Upload LIS/Middleware Data (CSV)", type=['csv'])
+uploaded_file = st.sidebar.file_uploader(
+    "Upload LIS/Middleware Data (CSV)", 
+    type=['csv'],
+    help="Upload your raw data extract. The file should be in CSV format and contain at least: Date/Time, Instrument Name, Test ID, and Result Value."
+)
 
 if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     actual_columns = df_raw.columns.tolist()
     
     with st.sidebar.expander("⚙️ Column Mapping", expanded=False):
-        date_col = st.selectbox("Date Column", actual_columns, index=0)
-        date_format = st.selectbox("Date Format", [
+        date_col = st.selectbox(
+            "Date Column", 
+            actual_columns, 
+            index=0,
+            help="Select the column containing the timestamp for each test result."
+        )
+        date_format = st.selectbox(
+            "Date Format", [
             "Auto-detect", "YYYYMMDDHHMMSS (Dense)", "YYYY-MM-DD HH:MM:SS", "DD/MM/YYYY HH:MM:SS", "MM/DD/YYYY HH:MM:SS"
-        ])
-        inst_col = st.selectbox("Instrument Column", actual_columns, index=0)
-        test_col = st.selectbox("Test ID Column", actual_columns, index=0)
-        val_col = st.selectbox("Result Value Column", actual_columns, index=0)
+        ],
+            help="If 'Auto-detect' fails, manually specify how the dates are formatted in your file."
+        )
+        inst_col = st.selectbox(
+            "Instrument Column", 
+            actual_columns, 
+            index=0,
+            help="Select the column that identifies which analyzer performed the test."
+        )
+        test_col = st.selectbox(
+            "Test ID Column", 
+            actual_columns, 
+            index=0,
+            help="Select the column that contains the name or ID of the assay (e.g., AST, K, Na)."
+        )
+        val_col = st.selectbox(
+            "Result Value Column", 
+            actual_columns, 
+            index=0,
+            help="Select the column containing the actual numeric result of the test."
+        )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("🧹 2. Gross Cleansing")
@@ -259,8 +286,16 @@ if uploaded_file:
         selected_insts = st.sidebar.multiselect("Select Instrument(s)", unique_inst, default=unique_inst[0] if len(unique_inst) > 0 else None)
         
         if selected_insts:
-            gross_min = st.sidebar.number_input("Min Physiological Value", value=0.0)
-            gross_max = st.sidebar.number_input("Max Physiological Value", value=500.0)
+            gross_min = st.sidebar.number_input(
+                "Min Physiological Value", 
+                value=0.0,
+                help="Absolute lowest possible value for this assay. Anything lower is considered a gross error (e.g., bubbles, clots) and is deleted before AON analysis."
+            )
+            gross_max = st.sidebar.number_input(
+                "Max Physiological Value", 
+                value=500.0,
+                help="Absolute highest possible value for this assay. Anything higher is considered a gross error and is deleted."
+            )
             
             if st.sidebar.button("Apply Gross Cleansing", type="primary", use_container_width=True):
                 df_inst = df_test[df_test[inst_col].astype(str).isin(selected_insts)].copy()
@@ -288,7 +323,13 @@ if uploaded_file:
                     "instruments": selected_insts,
                     "total_points": len(df_clean)
                 }
-                st.sidebar.success(f"✅ Ready! {len(df_clean)} records retained.")
+                st.session_state['column_mapping'] = {
+                    'date_col': date_col,
+                    'inst_col': inst_col,
+                    'test_col': test_col,
+                    'val_col': val_col
+                }
+                st.sidebar.success(f"✅ Ready! {len(df_clean)} records retained from Assay {selected_test}.")
 
 # ==========================================
 # MAIN CANVAS: DASHBOARD & SIMULATION
@@ -314,22 +355,64 @@ else:
             
         with col_aon:
             st.markdown("##### 📐 AON Parameters")
-            algorithm = st.selectbox("Algorithm PBRTQC Standard", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
-            operating_mode = st.radio("Operating Mode", ["Continuous (Rolling)", "Batch (Binning)"], horizontal=True)
-            block_sizes_input = st.text_input("Block Sizes / Windows (comma-separated)", value="10, 25, 50, 100")
+            algorithm = st.selectbox(
+                "Algorithm PBRTQC Standard", 
+                ["Simple Moving Average (SMA)", "Moving Median", "EWMA"],
+                help="SMA is the most common and easiest to interpret. EWMA gives more weight to recent results, making it faster to detect sudden shifts."
+            )
+            operating_mode = st.radio(
+                "Operating Mode / Grouping period", 
+                ["Continuous (Rolling)", "Batch (Binning)"], 
+                horizontal=True,
+                help="Continuous checks for alarms after every single patient result. Batch waits until 'N' results are collected, averages them, and checks once."
+            )
+            block_sizes_input = st.text_input(
+                "Block Sizes / Windows (comma-separated)", 
+                value="10, 25, 50, 100",
+                help="The number of patient results (N) used to calculate the average. Smaller blocks detect large errors faster; larger blocks detect small, subtle shifts."
+            )
             
             st.markdown("**Algorithmic Truncation Limits**")
             st.caption("Filters normal population to reduce noise.")
             c_trunc1, c_trunc2 = st.columns(2)
-            with c_trunc1: trunc_min = st.number_input("Physiological Lower Limit", value=5.0, step=0.1)
-            with c_trunc2: trunc_max = st.number_input("Physiological Upper Limit", value=60.0, step=0.1)
-            control_limit_z = st.number_input("Control Limits Z-Score", value=3.0, step=0.1)
+            with c_trunc1: 
+                trunc_min = st.number_input(
+                    "Physiological Lower Limit", 
+                    value=5.0, 
+                    step=0.1,
+                    help="Results below this value are ignored by the algorithm. Set this to isolate the 'normal' healthy population."
+                )
+            with c_trunc2: 
+                trunc_max = st.number_input(
+                    "Physiological Upper Limit", 
+                    value=60.0, 
+                    step=0.1,
+                    help="CRITICAL: Results above this are ignored. Do not set this too high, or pathological outliers will distort your baseline and mask real errors!"
+                )
+            control_limit_z = st.number_input(
+                "Control Limits Z-Score (Noise Multiplier)", 
+                value=3.0, 
+                step=0.1,
+                help="Determines how wide your UCL and LCL are. A Z-score of 3.0 is standard. Lowering it increases sensitivity but also increases false alarms."
+            )
 
         with col_sim:
             st.markdown("##### 🎯 Simulation Settings")
             c_sim1, c_sim2 = st.columns(2)
-            with c_sim1: samples_before = st.number_input("Samples Before", value=150, step=10)
-            with c_sim2: samples_after = st.number_input("Samples After", value=500, step=10)
+            with c_sim1: 
+                samples_before = st.number_input(
+                    "Samples Before", 
+                    value=150, 
+                    step=10,
+                    help="The 'warm-up' period. The number of normal, healthy samples processed to establish a stable baseline *before* the error is injected."
+                )
+            with c_sim2: 
+                samples_after = st.number_input(
+                    "Samples After", 
+                    value=500, 
+                    step=10,
+                    help="The 'runway'. The maximum number of samples the engine will process after injecting the error to see if an alarm triggers."
+                )
             
             try:
                 max_n_continuous_flair = max([int(n.strip()) for n in block_sizes_input.split(',') if n.strip().isdigit()])
@@ -346,7 +429,13 @@ else:
 
             st.caption(f"💡 **Tip:** Set 'Samples After' to at least **{continuous_recommendation_samples_after_flair}**{continuous_safey_check_recommend_flair} (based on max N={max_n_continuous_flair} and dataset size).")
 
-            sim_runs = st.number_input("Simulations per Bias", min_value=5, max_value=100, value=20)
+            sim_runs = st.number_input(
+                "Simulations per Bias", 
+                min_value=5, 
+                max_value=100, 
+                value=20,
+                help="How many times to repeat the Monte Carlo simulation for each bias level to find the median detection speed."
+            )
             
             st.markdown("**Bias Range (%)**")
             b_col1, b_col2, b_col3 = st.columns(3)
@@ -371,6 +460,7 @@ else:
             df_trunc = df[base_mask].copy()
             
             for n in block_sizes:
+                # 1. Calculate Baseline MA Stats
                 if "Simple" in algorithm:
                     baseline_ma = df_trunc[v_col].rolling(window=n).mean()
                 elif "Median" in algorithm:
@@ -397,7 +487,7 @@ else:
                     "UCL": ucl
                 })
                 
-                # Pre-Flight Warning
+                # --- PRE-FLIGHT WARNING ---
                 max_bias_pct = max([abs(b) for b in biases]) / 100.0
                 max_theoretical_shift = target_mean * max_bias_pct
                 distance_to_ucl = ucl - target_mean
@@ -411,6 +501,7 @@ else:
                     *The simulated error is mathematically invisible to the algorithm. Lower your Upper Truncation Limit to shrink the baseline noise.*
                     """)
                 
+                # 2. Run Simulations
                 for bias in biases:
                     nped_list = []
                     for _ in range(sim_runs):
@@ -438,8 +529,10 @@ else:
                             if "Batch" in operating_mode:
                                 ma_sim = ma_sim[n-1::n]
                                 
+                            # Calculate exact index where bias starts in truncated array
                             trunc_start_idx = valid_mask[:start_idx].sum()
                             
+                            # Search for breaches AFTER injection
                             ma_post_injection = ma_sim[ma_sim.index >= trunc_start_idx]
                             breaches = ma_post_injection[(ma_post_injection > ucl) | (ma_post_injection < lcl)].index
                             
@@ -513,7 +606,8 @@ else:
                             title="Bias Detection Curves (All Block Sizes)",
                             labels={"Median NPed": "Results needed for bias detection"}
                         )
-                        fig_line.update_layout(template="plotly_white", height=600)
+                        # Auto-scales Y-axis
+                        fig_line.update_layout(template="plotly_white")
                         st.plotly_chart(fig_line, use_container_width=True)
                     
                     with c_chart2:
@@ -531,40 +625,38 @@ else:
                             ),
                             marker_color='#004b7d'
                         ))
-                        fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white", height=600)
+                        fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white")
                         st.plotly_chart(fig_bar, use_container_width=True)
 
             with tab_data:
                 st.markdown("#### Bias Impact Analysis")
                 st.markdown("Theoretical shifts for the primary window to confirm if limits are breached.")
                 
-                bias_impact_data_all = []
                 if len(baseline_stats) > 0:
                     primary_stat = baseline_stats[0]
                     p_mean = primary_stat["Target Mean"]
                     p_lcl = primary_stat["LCL"]
                     p_ucl = primary_stat["UCL"]
                     
+                    bias_impact_data = []
                     for bias in biases:
                         shifted_mean = p_mean * (1 + (bias / 100.0))
                         will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No 🟢"
-                        bias_impact_data_all.append({
+                        bias_impact_data.append({
                             "Bias (%)": f"{bias}%",
-                            "Shifted Theoretical Mean": shifted_mean, 
-                            "Display Mean": f"{shifted_mean:.3f}",
+                            "Shifted Mean": f"{shifted_mean:.3f}",
                             "LCL": f"{p_lcl:.3f}",
                             "UCL": f"{p_ucl:.3f}",
                             "Breaches Limits?": will_alarm
                         })
-                    
-                    display_df = pd.DataFrame(bias_impact_data_all).drop(columns=['Shifted Theoretical Mean']).rename(columns={'Display Mean': 'Shifted Mean'})
-                    st.dataframe(display_df, use_container_width=True)
+                    st.dataframe(pd.DataFrame(bias_impact_data), use_container_width=True)
 
             with tab_report:
                 st.markdown("#### Generate Professional IFCC Compliance Report")
                 st.info("Exports parameters, historic data context, and verified results into a professional PDF format.")
                 
                 if not res_df.empty and len(baseline_stats) > 0:
+                    # Look for the logo in the current directory
                     logo_file = "logo.png" if os.path.exists("logo.png") else None
 
                     pdf = PDFReport(
@@ -585,6 +677,23 @@ else:
                         total_data_points=st.session_state['data_usage_flair']['total_points'], 
                         org=org_name
                     )
+
+                    # We pass the full list of bias impact data so the scorecard can dynamically reference the max theoretical shift
+                    bias_impact_data_all = []
+                    p_mean = primary_stat["Target Mean"]
+                    p_lcl = primary_stat["LCL"]
+                    p_ucl = primary_stat["UCL"]
+                    for bias in biases:
+                        shifted_mean = p_mean * (1 + (bias / 100.0))
+                        will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No 🟢"
+                        bias_impact_data_all.append({
+                            "Bias (%)": f"{bias}%",
+                            "Shifted Theoretical Mean": shifted_mean, 
+                            "Display Mean": f"{shifted_mean:.3f}",
+                            "LCL": f"{p_lcl:.3f}",
+                            "UCL": f"{p_ucl:.3f}",
+                            "Breaches Limits?": will_alarm
+                        })
 
                     pdf.professional_aon_scorecard(
                         stat_row=baseline_stats[0], 
