@@ -5,23 +5,26 @@ import plotly.graph_objects as go
 import plotly.express as px
 import random
 import os
+import tempfile
 from fpdf import FPDF
 from PIL import Image
 
-# --- PAGE CONFIGURATION & BRANDING ---
+# --- PAGE CONFIGURATION ---
 APP_NAME = "LabMesh AoN Optimization Engine"
 st.set_page_config(page_title=APP_NAME, layout="wide", initial_sidebar_state="expanded")
 
-# --- PROFESSIONAL COLOR SCHEME ---
-PROFESSIONAL_BLUE = (0, 75, 125)
-LIGHT_BLUE_BG = (220, 240, 250)
+# --- PROFESSIONAL BLUE COLOR SCHEME ---
+PROFESSIONAL_BLUE = (0, 75, 125)  # Professional Dark Blue
+LIGHT_BLUE_BG = (220, 240, 250)    # Professional Very Light Blue
+
+# --- Define standard Interpretive Flair colors for the PDF report ---
 INTERPRETATION_COLORS = {
-    "Breach": (150, 0, 0),         
-    "Green": (0, 150, 0),          
-    "Grey": (150, 150, 150),        
+    "Breach": (150, 0, 0),         # Professional Red for limit breaches
+    "Green": (0, 150, 0),          # Professional Green
+    "Grey": (150, 150, 150),        # Professional Grey
 }
 
-# --- CUSTOM CSS ---
+# --- CUSTOM CSS FOR DASHBOARD UX ---
 st.markdown("""
     <style>
     div[data-testid="metric-container"] {
@@ -40,6 +43,7 @@ st.markdown("""
         background-color: #0060a0;
         color: white;
     }
+    /* Align Title with larger logo */
     .app-title {
         margin-top: 15px;
     }
@@ -47,7 +51,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# APP HEADER & LOGO
+# APP HEADER & LOGO (LARGER SIZE)
 # ==========================================
 col_logo, col_title = st.columns([1.5, 10]) 
 with col_logo:
@@ -165,15 +169,21 @@ if uploaded_file:
 if 'clean_data' not in st.session_state:
     st.info("👈 Please upload and cleanse your data in the sidebar to unlock the dashboard.")
 else:
-    total_rows = st.session_state['data_usage_flair']['total_points']
-    
+    # Safely get the total rows and assay name, defaulting if not yet set
+    try:
+        total_rows = st.session_state['data_usage_flair']['total_points']
+        default_assay = st.session_state['data_usage_flair']['assay']
+    except KeyError:
+        total_rows = 1000 # Safe fallback
+        default_assay = "Assay"
+        
     with st.expander("🛠️ Simulation & AON Configurations", expanded=True):
         col_meta, col_aon, col_sim = st.columns(3)
         
         with col_meta:
             st.markdown("##### 📝 Report Metadata")
             org_name = st.text_input("Organization", value="Roche Diagnostics India")
-            assay_name = st.text_input("Assay Name", value=st.session_state['data_usage_flair']['assay'])
+            assay_name = st.text_input("Assay Name", value=default_assay)
             unit = st.text_input("Unit", value="U/L")
             
         with col_aon:
