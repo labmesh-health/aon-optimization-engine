@@ -22,9 +22,15 @@ INTERPRETATION_COLORS = {
     "Grey": (150, 150, 150),        # Professional Grey
 }
 
-# --- CUSTOM CSS FOR BUTTONS ---
+# --- CUSTOM CSS FOR DASHBOARD UX ---
 st.markdown("""
     <style>
+    div[data-testid="metric-container"] {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        padding: 5% 5% 5% 10%;
+        border-radius: 5px;
+    }
     div.stButton > button {
         background-color: #004b7d;
         color: white;
@@ -52,25 +58,24 @@ class PDFReport(FPDF):
         self.logo_path = logo_path
         self.set_auto_page_break(auto=True, margin=15)
         self.alias_nb_pages()
-        self.set_fill_color(*LIGHT_BLUE_BG) # Default fill
-        self.set_draw_color(0, 0, 0) # Normal borders
+        self.set_fill_color(*LIGHT_BLUE_BG) 
+        self.set_draw_color(0, 0, 0) 
 
     def header(self):
         if self.logo_path and os.path.exists(self.logo_path):
-            self.image(self.logo_path, 10, 8, 30) # Path, x, y, width
+            self.image(self.logo_path, 10, 8, 30) 
         else:
-             # Description Flair: Placeholder image if path isn't provided or doesn't exist
              self.set_draw_color(*INTERPRETATION_COLORS["Grey"])
              self.rect(10, 8, 30, 20)
              self.set_xy(11, 10)
              self.set_font("helvetica", 'I', 8)
-             self.cell(28, 16, "Place Website Logo here (logo.png)", align='C')
+             self.cell(28, 16, "Place Website Logo here", align='C')
              self.set_text_color(0)
-             self.set_draw_color(0) # Reset to black borders
+             self.set_draw_color(0) 
 
         self.set_font("helvetica", 'B', 12)
         self.set_text_color(*PROFESSIONAL_BLUE)
-        self.set_xy(10, 8) # Move to right of logo
+        self.set_xy(10, 8) 
         self.cell(0, 10, self.org_name, ln=True, align='R')
         self.set_font("helvetica", 'B', 20)
         self.set_text_color(0)
@@ -93,118 +98,100 @@ class PDFReport(FPDF):
         self.set_font("helvetica", 'B', 14)
         self.set_text_color(*PROFESSIONAL_BLUE)
         self.cell(0, 10, label, ln=True)
-        self.set_text_color(0) # Reset to black
+        self.set_text_color(0) 
         self.ln(3)
 
     def dynamic_intro_flair(self):
-        """Add dynamic introduction text and quality guideline context."""
         intro_text = f"Executive Summary: Performance verification of the {self.algorithm_type} implementation for Assay {self.assay} ({self.unit}). Using {self.grouping_mode} grouping, standard simulation parameters were applied to the laboratory's historic dataset. Baseline statistics and control limits (UCL/LCL) match standard verification practices for Average Number of patient results until Error Detection (ANPed). Monte Carlo simulation performance verified per IFCC and quality specifications."
         self.multi_cell(0, 5, intro_text)
         self.ln(5)
 
     def professional_parameter_card(self, label, value):
-        """Create professional, lined AON parameter cards."""
         self.set_font("helvetica", 'B', 10)
         self.cell(40, 6, label + ":", border='L, T', fill=True)
         self.set_font("helvetica", '', 10)
         self.cell(0, 6, str(value), border='R, T', ln=True)
 
     def professional_aon_scorecard(self, stat_row, bias_impact_data_all, trunc_min, trunc_max, algorithm, operating_mode, control_limit_z):
-        """Create a professional, card-like AON scorecard, combining baseline stats and interpretations."""
         N = stat_row['Window / Block Size (N)']
         self.set_font("helvetica", 'B', 12)
         self.cell(0, 10, f"AON Scorecard: Block Size (Window) N={N}", ln=True)
         self.ln(2)
 
-        # Parameter summary box within scorecard
         self.set_fill_color(*LIGHT_BLUE_BG)
-        self.professional_parameter_card("Algorithm used (PBRTQC standard)", algorithm)
-        self.professional_parameter_card("Grouping period / True mode", operating_mode)
-        self.professional_parameter_card("Control Z-Score (PBRTQC noise threshold)", control_limit_z)
-        # Combine limits for visual flair
+        self.professional_parameter_card("Algorithm used", algorithm)
+        self.professional_parameter_card("Grouping period", operating_mode)
+        self.professional_parameter_card("Control Z-Score", control_limit_z)
         self.professional_parameter_card("Algorithmic Truncation Range", f"{trunc_min} to {trunc_max} ({self.unit})")
-        self.cell(0, 0, "", border='T', ln=True) # Bottom border
+        self.cell(0, 0, "", border='T', ln=True) 
         self.ln(3)
 
-        # Baseline Statistics interpretation with Professional header color
         self.set_font("helvetica", 'B', 10)
         self.set_text_color(*PROFESSIONAL_BLUE)
-        self.set_fill_color(*LIGHT_BLUE_BG) # Professional Light Blue
+        self.set_fill_color(*LIGHT_BLUE_BG) 
 
-        # Huvaros Scorecard look: alternate row background colors or colored header and colored limits column
         cols = ["Property (Verification Stats binned population)", "Value"]
         property_w = 100
         value_w = 90
-        # Color the header row
+        
         self.cell(property_w, 8, cols[0], border=1, fill=True, align='L')
         self.cell(value_w, 8, cols[1], border=1, fill=True, align='L', ln=True)
-        self.set_text_color(0) # Back to black
+        self.set_text_color(0) 
         self.set_font("helvetica", '', 10)
 
-        # Data rows from binned stats population - adding interpretation flair where possible
         data_rows = [
             ("Target Mean Average", f"{stat_row['Target Mean']:.3f} {self.unit}"),
-            ("Baseline Standard Deviation (PBRTQC noise SD)", f"{stat_row['Baseline SD']:.3f}"),
-            ("Upper Control Limit (Verification UCL)", f"{stat_row['Upper Control Limit (UCL)']:.3f} {self.unit}"),
-            ("Lower Control Limit (Verification LCL)", f"{stat_row['Lower Control Limit (LCL)']:.3f} {self.unit}"),
-            ("Simulated Max Theoretical Shift (Mean + Max Bias)", f"{bias_impact_data_all[0]['Shifted Theoretical Mean']:.3f} {self.unit}") # Pulling dynamically - FLAIR: use the theoretical shifted mean from bias impact table to compare to UCL directly
+            ("Baseline Standard Deviation", f"{stat_row['Baseline SD']:.3f}"),
+            ("Upper Control Limit (UCL)", f"{stat_row['Upper Control Limit (UCL)']:.3f} {self.unit}"),
+            ("Lower Control Limit (LCL)", f"{stat_row['Lower Control Limit (LCL)']:.3f} {self.unit}"),
+            ("Simulated Max Theoretical Shift (Mean + Max Bias)", f"{bias_impact_data_all[0]['Shifted Theoretical Mean']:.3f} {self.unit}") 
         ]
+        
         for prop, val in data_rows:
             self.cell(property_w, 8, prop, border=1)
-            # Interpretation color: check breach dynamically from theoretical shift
-            theoretic_shift_val = stat_row['Target Mean'] * (1 + 0.3) # assume +30% flair
-            # If the theoretical shifted mean doesn't breach UCL, color it Red for interpretation flaw
-            oretic_breach_text = stat_row['Target Mean'] + (stat_row['Target Mean'] * 0.3) #theoretical shift flair
-
             self.cell(value_w, 8, str(val), border=1, ln=True)
         self.ln(5)
 
-        # Dynamic interpretation disclaimer per window logic - a professional interpretive flair
-        self.interpretaion_notes(N, stat_row['Target Mean'], oretic_breach_text, algorithm)
         self.interpretaion_notes(N, stat_row['Target Mean'], stat_row['Upper Control Limit (UCL)'], algorithm)
 
     def multi_block_results_table(self, results_df):
-        """Create a professional multi-window performance verification data table with professional colors."""
-        self.interpretaion_notes(0,0,0,0) # dummy call to just reset any text color if needed
+        self.interpretaion_notes(0,0,0,0) 
 
-        # Color the header professionally
-        self.set_fill_color(*PROFESSIONAL_BLUE) # Professional Dark Blue Header background
-        self.set_text_color(*LIGHT_BLUE_BG) # Professional Light Blue Text for headers
+        self.set_fill_color(*PROFESSIONAL_BLUE) 
+        self.set_text_color(*LIGHT_BLUE_BG) 
         self.set_font("helvetica", 'B', 10)
 
-        # Simple centered headers for fpdf simplicity
-        headers = ["Window (W)", "Bias (%)", "Median NPed", "Min NPed", "Max NPed"]
         col_widths = [30, 25, 45, 30, 30]
+        headers = ["Window (W)", "Bias (%)", "Median NPed", "Min NPed", "Max NPed"]
+        
         for i, col in enumerate(headers):
              self.cell(col_widths[i], 8, col, border=1, align='C', fill=True)
 
-        self.set_text_color(0) # Reset to black text
+        self.set_text_color(0) 
         self.set_font("helvetica", '', 10)
         self.ln()
 
-        # Iterate over res_df to fill professional table
         for index, row in results_df.iterrows():
-            # A professionnel flair: alternate row background color
             if index % 2 == 0:
                  self.set_fill_color(245, 245, 245)
                  alternating_fill = True
             else:
                  alternating_fill = False
 
+            current_median = row['Median NPed']
+
             self.cell(col_widths[0], 8, str(row['Block Size (N)']), border=1, align='C', fill=alternating_fill)
             self.cell(col_widths[1], 8, f"{row['Bias (%)']}%", border=1, align='C', fill=alternating_fill)
 
-            # Interpretation color: check median NPed standard. Color Green/Red based on flair rule.
-            current_median = row['Median NPed']
             if current_median < 50:
                  self.set_text_color(*INTERPRETATION_COLORS["Green"])
             elif current_median > 200:
                  self.set_text_color(*INTERPRETATION_COLORS["Breach"])
             else:
-                 self.set_text_color(0) # Black
+                 self.set_text_color(0) 
 
             self.cell(col_widths[2], 8, f"{current_median:.0f}", border=1, align='C', fill=alternating_fill)
-            self.set_text_color(0) # Reset text color for following columns
+            self.set_text_color(0) 
 
             self.cell(col_widths[3], 8, f"{row['Min NPed']:.0f}", border=1, align='C', fill=alternating_fill)
             self.cell(col_widths[4], 8, f"{row['Max NPed']:.0f}", border=1, align='C', fill=alternating_fill)
@@ -212,28 +199,33 @@ class PDFReport(FPDF):
         self.ln(5)
 
     def data_summary_flair(self, assay, unit, instruments_used, total_data_points, org):
-        """Add dynamic, data-driven real-world context and real laboratory flair."""
         self.interpretaion_notes(0,0,0,0) 
         self.section_title("Real-World Data Verification (historic dataset overview)")
-        summary_text = f"The verification and verification was performed on real-world historic data ({total_data_points} points after clinical filtering). Historic results were collected from assay {assay} ({unit}), operated across {len(instruments_used)} different analytical modules at the {org} facility. This comprehensive historic data verified performance for multiple independent binned average grouping (W) standards, matching the IFCC real-time PBRTQC operational model."
+        summary_text = f"The verification was performed on real-world historic data ({total_data_points} points after clinical filtering). Historic results were collected from assay {assay} ({unit}), operated across {len(instruments_used)} different analytical modules at the {org} facility. This comprehensive historic data verified performance for multiple independent binned average grouping (W) standards, matching the IFCC real-time PBRTQC operational model."
         self.multi_cell(0, 5, summary_text)
         self.ln(5)
+        
         self.interpretaion_notes(0,0,0,0) 
         self.set_font("helvetica", 'B', 10)
-        self.cell(0, 8, f"Module modules Used ({len(instruments_used)} independent systems):", ln=True)
+        self.cell(0, 8, f"Modules Used ({len(instruments_used)} independent systems):", ln=True)
         self.set_font("helvetica", '', 10)
         instrum_list_text = ", ".join(instruments_used[:10]) + ("..." if len(instruments_used) > 10 else "")
         self.multi_cell(0, 5, instrum_list_text)
         self.ln(5)
 
     def interpretaion_notes(self, N, target, ucl, algorithm_type):
-        """Add dynamic, quality specification flair and dynamic disclaimers."""
-        self.interpretaion_notes(0,0,0,0) 
         if N == 0:
-            notes = "Verification Notes: All clinical decisions are the sole responsibility of the laboratory. NPed is the Median Number of Patient Results until Error Detection *within* a group (binned mode verification card or real-time continuous grouping mode results) based on Monte Carlo simulations. The tool provides a general verification of the internal verification and historic data. Results may not apply to new patient populations, analyzer maintenance conditions or new assay reagents. Interpretation color-coding (Green/Red) inside Multi-Block comparison table uses standard laboratory improvement targets. For official validation, a clinically relevant detection speed (ANPed) target should be compared to the actual Median ANPed performance results based on biological variation specifications and clinical assay goals."
+            notes = "Verification Notes: All clinical decisions are the sole responsibility of the laboratory. NPed is the Median Number of Patient Results until Error Detection *within* a group based on Monte Carlo simulations. The tool provides a general verification of the historic data. Results may not apply to new patient populations or analyzer conditions. Interpretation color-coding (Green/Red) uses standard laboratory improvement targets. For official validation, a clinically relevant detection speed (ANPed) target should be compared to the actual Median ANPed performance results based on biological variation specifications and clinical assay goals."
+            self.set_text_color(0)
             self.set_font("helvetica", 'I', 10)
             self.multi_cell(0, 5, notes)
             self.ln(5)
+        elif N > 0:
+             notes = f"Verification Interpretation (Window {N}): This scorecard verifies statistics matching the selected grouping mode. Real-time performance is verifiable inside the comparison table."
+             self.set_text_color(0)
+             self.set_font("helvetica", 'I', 10)
+             self.multi_cell(0, 5, notes)
+             self.ln(3)
 
 # ==========================================
 # SIDEBAR: PHASE 1 - DATA INGESTION & PREP
@@ -297,7 +289,7 @@ if uploaded_file:
                     "instruments": selected_insts,
                     "total_points": len(df_clean)
                 }
-                st.sidebar.success(f"✅ Ready! {len(df_clean)} records retained from Assay {selected_test}.")
+                st.sidebar.success(f"✅ Ready! {len(df_clean)} records retained.")
 
 # ==========================================
 # MAIN CANVAS: DASHBOARD & SIMULATION
@@ -317,21 +309,21 @@ else:
         
         with col_meta:
             st.markdown("##### 📝 Report Metadata")
-            org_name = st.text_input("Organization / Laboratory Facility", value="Roche Diagnostics India")
+            org_name = st.text_input("Organization", value="Roche Diagnostics India")
             assay_name = st.text_input("Assay Name", value=st.session_state['data_usage_flair']['assay'])
-            unit = st.text_input("Unit of Measure", value="U/L")
+            unit = st.text_input("Unit", value="U/L")
             
         with col_aon:
             st.markdown("##### 📐 AON Parameters")
-            algorithm = st.selectbox("Algorithm PBRTQC Standard", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
+            algorithm = st.selectbox("Algorithm", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
             operating_mode = st.radio("Operating Mode", ["Continuous (Rolling)", "Batch (Binning)"], horizontal=True)
-            block_sizes_input = st.text_input("Block Sizes / Windows (comma-separated)", value="10, 25, 50, 100")
+            block_sizes_input = st.text_input("Block Sizes (comma-separated)", value="10, 25, 50, 100")
             
             st.markdown("**Algorithmic Truncation Limits**")
             st.caption("Filters normal population to reduce noise.")
             c_trunc1, c_trunc2 = st.columns(2)
-            with c_trunc1: trunc_min = st.number_input("Physiological Lower Limit", value=5.0, step=0.1)
-            with c_trunc2: trunc_max = st.number_input("Physiological Upper Limit", value=60.0, step=0.1)
+            with c_trunc1: trunc_min = st.number_input("Lower Truncation Limit", value=5.0, step=0.1)
+            with c_trunc2: trunc_max = st.number_input("Upper Truncation Limit", value=60.0, step=0.1)
             control_limit_z = st.number_input("Control Limits Z-Score", value=3.0, step=0.1)
 
         with col_sim:
@@ -395,12 +387,17 @@ else:
                 ucl = target_mean + (control_limit_z * ma_sd)
                 lcl = target_mean - (control_limit_z * ma_sd)
                 
+                # --- KEY FIX FOR THE PDF ---
+                # The PDF code looks for these EXACT keys. Do not change these strings.
                 baseline_stats.append({
                     "Window / Block Size (N)": n,
+                    "Block Size (N)": n,
                     "Target Mean": target_mean,
                     "Baseline SD": ma_sd,
                     "Lower Control Limit (LCL)": lcl,
-                    "Upper Control Limit (UCL)": ucl
+                    "Upper Control Limit (UCL)": ucl,
+                    "LCL": lcl,
+                    "UCL": ucl
                 })
                 
                 # Pre-Flight Warning
@@ -466,7 +463,7 @@ else:
             # --- RENDER RESULTS UI ---
             st.markdown("---")
             
-            # Professional Custom HTML Cards for Baseline Stats
+            # Baseline Cards (Using custom HTML for shadowing and colors)
             st.subheader("📊 Baseline Limits per Window")
             card_cols = st.columns(len(baseline_stats))
             for i, stat in enumerate(baseline_stats):
@@ -556,7 +553,7 @@ else:
                         will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No 🟢"
                         bias_impact_data_all.append({
                             "Bias (%)": f"{bias}%",
-                            "Shifted Theoretical Mean": shifted_mean, # Storing float for PDF logic
+                            "Shifted Theoretical Mean": shifted_mean, 
                             "Display Mean": f"{shifted_mean:.3f}",
                             "LCL": f"{p_lcl:.3f}",
                             "UCL": f"{p_ucl:.3f}",
@@ -571,10 +568,8 @@ else:
                 st.info("Exports parameters, historic data context, and verified results into a professional PDF format.")
                 
                 if not res_df.empty and len(baseline_stats) > 0:
-                    # Determine logo path safely
                     logo_file = "logo.png" if os.path.exists("logo.png") else None
 
-                    # Initialize Professional PDF
                     pdf = PDFReport(
                         org_name=org_name, 
                         assay=assay_name, 
@@ -585,7 +580,6 @@ else:
                     )
                     pdf.add_page()
                     
-                    # Section 1: Intro & Context
                     pdf.dynamic_intro_flair()
                     pdf.data_summary_flair(
                         assay=assay_name, 
@@ -595,7 +589,6 @@ else:
                         org=org_name
                     )
 
-                    # Section 2: Scorecard (Using Primary Window)
                     pdf.professional_aon_scorecard(
                         stat_row=baseline_stats[0], 
                         bias_impact_data_all=bias_impact_data_all,
@@ -606,10 +599,8 @@ else:
                         control_limit_z=control_limit_z
                     )
                     
-                    # Section 3: Result Table
                     pdf.section_title("Simulation Error Detection Results (ANPed)")
                     
-                    # Filter results for the primary block size to match the scorecard
                     primary_results_df = res_df[res_df['Block Size (N)'] == str(primary_stat['Block Size (N)'])]
                     pdf.multi_block_results_table(primary_results_df)
                     
