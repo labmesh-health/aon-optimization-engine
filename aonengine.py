@@ -58,24 +58,24 @@ class PDFReport(FPDF):
         self.logo_path = logo_path
         self.set_auto_page_break(auto=True, margin=15)
         self.alias_nb_pages()
-        self.set_fill_color(*LIGHT_BLUE_BG) 
-        self.set_draw_color(0, 0, 0) 
+        self.set_fill_color(*LIGHT_BLUE_BG) # Default fill
+        self.set_draw_color(0, 0, 0) # Normal borders
 
     def header(self):
         if self.logo_path and os.path.exists(self.logo_path):
-            self.image(self.logo_path, 10, 8, 30) 
+            self.image(self.logo_path, 10, 8, 30) # Path, x, y, width
         else:
              self.set_draw_color(*INTERPRETATION_COLORS["Grey"])
              self.rect(10, 8, 30, 20)
              self.set_xy(11, 10)
              self.set_font("helvetica", 'I', 8)
-             self.cell(28, 16, "Place Website Logo here", align='C')
+             self.cell(28, 16, "Place Website Logo here (logo.png)", align='C')
              self.set_text_color(0)
-             self.set_draw_color(0) 
+             self.set_draw_color(0) # Reset to black borders
 
         self.set_font("helvetica", 'B', 12)
         self.set_text_color(*PROFESSIONAL_BLUE)
-        self.set_xy(10, 8) 
+        self.set_xy(10, 8) # Move to right of logo
         self.cell(0, 10, self.org_name, ln=True, align='R')
         self.set_font("helvetica", 'B', 20)
         self.set_text_color(0)
@@ -89,7 +89,7 @@ class PDFReport(FPDF):
         self.set_y(-15)
         self.set_font("helvetica", 'I', 8)
         self.set_text_color(*INTERPRETATION_COLORS["Grey"])
-        self.cell(0, 10, "© 2024 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", ln=True, align='C')
+        self.cell(0, 10, "© 2026 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", ln=True, align='C')
         self.set_x(-20)
         self.cell(20, 10, f"Page {self.page_no()}/{{nb}}", ln=True, align='R')
 
@@ -98,7 +98,7 @@ class PDFReport(FPDF):
         self.set_font("helvetica", 'B', 14)
         self.set_text_color(*PROFESSIONAL_BLUE)
         self.cell(0, 10, label, ln=True)
-        self.set_text_color(0) 
+        self.set_text_color(0) # Reset to black
         self.ln(3)
 
     def dynamic_intro_flair(self):
@@ -161,9 +161,8 @@ class PDFReport(FPDF):
         self.set_text_color(*LIGHT_BLUE_BG) 
         self.set_font("helvetica", 'B', 10)
 
-        col_widths = [30, 25, 45, 30, 30]
         headers = ["Window (W)", "Bias (%)", "Median NPed", "Min NPed", "Max NPed"]
-        
+        col_widths = [30, 25, 45, 30, 30]
         for i, col in enumerate(headers):
              self.cell(col_widths[i], 8, col, border=1, align='C', fill=True)
 
@@ -309,21 +308,21 @@ else:
         
         with col_meta:
             st.markdown("##### 📝 Report Metadata")
-            org_name = st.text_input("Organization", value="Roche Diagnostics India")
+            org_name = st.text_input("Organization / Laboratory Facility", value="Roche Diagnostics India")
             assay_name = st.text_input("Assay Name", value=st.session_state['data_usage_flair']['assay'])
-            unit = st.text_input("Unit", value="U/L")
+            unit = st.text_input("Unit of Measure", value="U/L")
             
         with col_aon:
             st.markdown("##### 📐 AON Parameters")
-            algorithm = st.selectbox("Algorithm", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
+            algorithm = st.selectbox("Algorithm PBRTQC Standard", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
             operating_mode = st.radio("Operating Mode", ["Continuous (Rolling)", "Batch (Binning)"], horizontal=True)
-            block_sizes_input = st.text_input("Block Sizes (comma-separated)", value="10, 25, 50, 100")
+            block_sizes_input = st.text_input("Block Sizes / Windows (comma-separated)", value="10, 25, 50, 100")
             
             st.markdown("**Algorithmic Truncation Limits**")
             st.caption("Filters normal population to reduce noise.")
             c_trunc1, c_trunc2 = st.columns(2)
-            with c_trunc1: trunc_min = st.number_input("Lower Truncation Limit", value=5.0, step=0.1)
-            with c_trunc2: trunc_max = st.number_input("Upper Truncation Limit", value=60.0, step=0.1)
+            with c_trunc1: trunc_min = st.number_input("Physiological Lower Limit", value=5.0, step=0.1)
+            with c_trunc2: trunc_max = st.number_input("Physiological Upper Limit", value=60.0, step=0.1)
             control_limit_z = st.number_input("Control Limits Z-Score", value=3.0, step=0.1)
 
         with col_sim:
@@ -387,8 +386,6 @@ else:
                 ucl = target_mean + (control_limit_z * ma_sd)
                 lcl = target_mean - (control_limit_z * ma_sd)
                 
-                # --- KEY FIX FOR THE PDF ---
-                # The PDF code looks for these EXACT keys. Do not change these strings.
                 baseline_stats.append({
                     "Window / Block Size (N)": n,
                     "Block Size (N)": n,
@@ -463,7 +460,7 @@ else:
             # --- RENDER RESULTS UI ---
             st.markdown("---")
             
-            # Baseline Cards (Using custom HTML for shadowing and colors)
+            # Baseline Cards
             st.subheader("📊 Baseline Limits per Window")
             card_cols = st.columns(len(baseline_stats))
             for i, stat in enumerate(baseline_stats):
@@ -516,7 +513,7 @@ else:
                             title="Bias Detection Curves (All Block Sizes)",
                             labels={"Median NPed": "Results needed for bias detection"}
                         )
-                        fig_line.update_layout(template="plotly_white")
+                        fig_line.update_layout(template="plotly_white", height=600)
                         st.plotly_chart(fig_line, use_container_width=True)
                     
                     with c_chart2:
@@ -534,7 +531,7 @@ else:
                             ),
                             marker_color='#004b7d'
                         ))
-                        fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white")
+                        fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white", height=600)
                         st.plotly_chart(fig_bar, use_container_width=True)
 
             with tab_data:
