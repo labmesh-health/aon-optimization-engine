@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import random
 import os
-import tempfile
 from fpdf import FPDF
 from PIL import Image
 
@@ -184,6 +183,23 @@ else:
             assay_name = st.text_input("Assay Name", value=default_assay)
             unit = st.text_input("Unit", value="U/L")
             
+            st.markdown("##### 🔬 Clinical Quality Goals (Optional)")
+            c_tea1, c_tea2 = st.columns(2)
+            with c_tea1:
+                tea_input = st.number_input("Total Allowable Error (TEa %)", value=0.0, step=0.1, help="The maximum acceptable total error for this assay. If provided with CV, the tool will calculate the Critical Systematic Error (ΔSEc).")
+            with c_tea2:
+                cv_input = st.number_input("Analytical CV (%)", value=0.0, step=0.1, help="The current analytical Coefficient of Variation for this assay.")
+
+            # Calculate dSEc if inputs are valid
+            calc_dSEc = None
+            if tea_input > 0 and cv_input > 0:
+                calc_dSEc = (tea_input / cv_input) - 1.65
+                if calc_dSEc > 0:
+                    st.success(f"**Calculated ΔSEc:** {calc_dSEc:.2f} (Critical Shift)")
+                else:
+                    st.error("Calculated ΔSEc is ≤ 0. Check TEa and CV values.")
+                    calc_dSEc = None
+
         with col_aon:
             st.markdown("##### 📐 AON Parameters")
             algorithm = st.selectbox("Algorithm", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"], help="SMA is the most common. EWMA gives more weight to recent results, detecting sudden shifts faster.")
@@ -342,20 +358,25 @@ else:
                     c_chart1, c_chart2 = st.columns([2, 1])
                     with c_chart1:
                         fig_line = px.line(res_df, x="Bias (%)", y="Median NPed", color="Block Size (N)", markers=True, title="Bias Detection Curves (All Block Sizes)")
+                        
+                        # Add dSEc lines if calculated
+                        if calc_dSEc:
+                            fig_line.add_vline(x=calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"+ΔSEc ({calc_dSEc:.1f}%)")
+                            fig_line.add_vline(x=-calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"-ΔSEc ({-calc_dSEc:.1f}%)")
+
                         fig_line.update_layout(template="plotly_white", height=600)
                         st.plotly_chart(fig_line, use_container_width=True)
                         
-                        # --- DYNAMIC CHART 1 SUMMARY ---
                         with st.expander("📝 Data Interpretation Notes: Multi-Window Curves", expanded=True):
-                            st.markdown(f"**Observations from the simulated data:**")
-                            st.markdown(f"* **Sensitivity vs. Speed:** Smaller block sizes (e.g., N={block_sizes[0]}) generally detect large shifts faster. Larger blocks tend to be better at confirming smaller, subtle shifts.")
-                            # Check if the smallest bias was detected by any window
-                            smallest_bias_mag = min([abs(b) for b in biases])
-                            smallest_bias_results = res_df[res_df['Bias (%)'].abs() == smallest_bias_mag]
-                            if not smallest_bias_results.empty:
-                                min_detect_n = smallest_bias_results.loc[smallest_bias_results['Median NPed'].idxmin()]['Block Size (N)']
-                                st.markdown(f"* **Small Bias Detection:** For the smallest simulated shift (±{smallest_bias_mag}%), window size **N={min_detect_n}** provided the fastest median detection.")
-                            st.caption("*Disclaimer: These observations are based on Monte Carlo simulations of historic data. They do not constitute clinical guidance. Always compare ANPed targets to analytical quality specifications (e.g., allowable total error).*")
+                            if calc_dSEc:
+                                st.markdown(f"**Clinical Quality Goal Analysis (TEa: {tea_input}%, CV: {cv_input}%):**")
+                                st.markdown(f"* The calculated Critical Systematic Error (**ΔSEc**) is **±{calc_dSEc:.2f}%**. The red dashed lines indicate this critical failure point.")
+                                st.markdown(f"* To ensure clinical safety, the chosen AON configuration should demonstrate a low Median ANPed at or before this critical bias level.")
+                            else:
+                                st.warning("⚠️ **Clinical Applicability Note:** This simulation was run without a defined Total Allowable Error (TEa) or analytical CV. While the data shows how the algorithm responds to mathematical shifts, evaluating true clinical utility requires comparing these detection speeds against your laboratory's specific quality goals.")
+                            
+                            st.markdown(f"**General Observations:**")
+                            st.markdown(f"* **Sensitivity vs. Speed:** Smaller block sizes generally detect large shifts faster. Larger blocks tend to be better at confirming smaller, subtle shifts.")
 
                     with c_chart2:
                         primary_n = str(block_sizes[0])
@@ -366,29 +387,29 @@ else:
                             error_y=dict(type='data', array=primary_df["Max NPed"] - primary_df["Median NPed"], arrayminus=primary_df["Median NPed"] - primary_df["Min NPed"], visible=True),
                             marker_color='#004b7d'
                         ))
+                        
+                        # Add dSEc lines if calculated
+                        if calc_dSEc:
+                            fig_bar.add_vline(x=calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"+ΔSEc")
+                            fig_bar.add_vline(x=-calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"-ΔSEc")
+
                         fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white", height=600)
                         st.plotly_chart(fig_bar, use_container_width=True)
                         
-                        # --- DYNAMIC CHART 2 SUMMARY ---
                         with st.expander(f"📝 Data Interpretation Notes: Primary Window (N={primary_n})", expanded=True):
                             st.markdown(f"**Observations from the simulated data:**")
-                            
-                            # Analyze the -5% / +5% (or smallest bias) behavior
                             smallest_bias = primary_df['Bias (%)'].abs().min()
                             small_bias_data = primary_df[primary_df['Bias (%)'].abs() == smallest_bias]
                             if not small_bias_data.empty:
-                                median_val = small_bias_data['Median NPed'].max() # Use max of the +/- to be conservative
-                                st.markdown(f"* **Subtle Shifts:** A small shift of ±{smallest_bias}% requires a median of **~{median_val:.0f}** patient results to trigger an alarm in this configuration.")
+                                median_val = small_bias_data['Median NPed'].max() 
+                                st.markdown(f"* **Subtle Shifts:** A small shift of ±{smallest_bias}% requires a median of **~{median_val:.0f}** patient results to trigger an alarm.")
                             
-                            # Analyze the larger shifts
                             largest_bias = primary_df['Bias (%)'].abs().max()
                             large_bias_data = primary_df[primary_df['Bias (%)'].abs() == largest_bias]
                             if not large_bias_data.empty:
                                 median_val_large = large_bias_data['Median NPed'].min()
                                 st.markdown(f"* **Critical Shifts:** A massive shift of ±{largest_bias}% is caught much faster, requiring a median of only **~{median_val_large:.0f}** patient results.")
-                                
-                            st.markdown(f"* **Variance:** The error bars (whiskers) indicate the minimum and maximum detection times observed during the {sim_runs} simulation runs. Wider bars mean less consistent detection.")
-                            st.caption(f"*Disclaimer: The clinical significance of a ±{smallest_bias}% shift depends entirely on the biological variation of {assay_name}. Evaluate if {median_val:.0f} reported patients is an acceptable risk for your laboratory.*")
+                            st.markdown(f"* **Variance:** The error bars indicate the min and max detection times observed during the {sim_runs} runs.")
 
             with tab_data:
                 st.markdown("#### Bias Impact Analysis")
@@ -432,8 +453,17 @@ else:
                     pdf.ln(5)
                     pdf.set_fill_color(240, 240, 240)
                     pdf.set_font("helvetica", 'B', 10)
-                    pdf.cell(95, 8, f" Truncation Range: {trunc_min} - {trunc_max} {unit}", border=1, fill=True)
-                    pdf.cell(95, 8, f" Control Limits Z-Score: {control_limit_z}", border=1, fill=True, ln=True)
+                    
+                    # Include Clinical Goals in PDF if available
+                    if calc_dSEc:
+                        pdf.cell(63, 8, f" Truncation: {trunc_min} - {trunc_max} {unit}", border=1, fill=True)
+                        pdf.cell(63, 8, f" Z-Score: {control_limit_z}", border=1, fill=True)
+                        pdf.set_text_color(*INTERPRETATION_COLORS["Breach"])
+                        pdf.cell(64, 8, f" Target dSEc: {calc_dSEc:.2f}%", border=1, fill=True, ln=True)
+                        pdf.set_text_color(0, 0, 0)
+                    else:
+                        pdf.cell(95, 8, f" Truncation Range: {trunc_min} - {trunc_max} {unit}", border=1, fill=True)
+                        pdf.cell(95, 8, f" Control Limits Z-Score: {control_limit_z}", border=1, fill=True, ln=True)
                     
                     pdf.section_title(f"Baseline Statistics (Primary Window N={primary_stat['Block Size (N)']})")
                     pdf.set_font("helvetica", '', 11)
@@ -443,6 +473,12 @@ else:
                     
                     pdf.section_title("Error Detection Performance (ANPed)")
                     
+                    if not calc_dSEc:
+                         pdf.set_font("helvetica", 'I', 9)
+                         pdf.set_text_color(100, 100, 100)
+                         pdf.multi_cell(0, 5, "Clinical Applicability Note: This simulation was run without a defined Total Allowable Error (TEa). Evaluating true clinical utility requires comparing these detection speeds against the laboratory's specific quality goals.")
+                         pdf.ln(3)
+
                     pdf.set_fill_color(*PROFESSIONAL_BLUE)
                     pdf.set_text_color(255, 255, 255)
                     pdf.set_font("helvetica", 'B', 10)
@@ -460,15 +496,24 @@ else:
                         if fill: pdf.set_fill_color(245, 245, 245)
                         
                         pdf.cell(col_w[0], 8, str(row['Block Size (N)']), border=1, align='C', fill=fill)
+                        
+                        # Highlight the bias row if it matches or exceeds the critical shift
+                        is_critical = False
+                        if calc_dSEc and abs(row['Bias (%)']) >= calc_dSEc and abs(row['Bias (%)']) < calc_dSEc + bias_step:
+                            is_critical = True
+                            pdf.set_text_color(*INTERPRETATION_COLORS["Breach"])
+                            pdf.set_font("helvetica", 'B', 10)
+                            
                         pdf.cell(col_w[1], 8, f"{row['Bias (%)']}%", border=1, align='C', fill=fill)
                         
                         if row['Median NPed'] < 50: pdf.set_text_color(*INTERPRETATION_COLORS["Green"])
-                        elif row['Median NPed'] > 200: pdf.set_text_color(*INTERPRETATION_COLORS["Breach"])
-                        else: pdf.set_text_color(0, 0, 0)
+                        elif row['Median NPed'] > 200 and not is_critical: pdf.set_text_color(*INTERPRETATION_COLORS["Breach"])
+                        elif not is_critical: pdf.set_text_color(0, 0, 0)
                             
                         pdf.cell(col_w[2], 8, f"{row['Median NPed']:.0f}", border=1, align='C', fill=fill)
                         
                         pdf.set_text_color(0, 0, 0)
+                        pdf.set_font("helvetica", '', 10)
                         pdf.cell(col_w[3], 8, f"{row['Min NPed']:.0f} - {row['Max NPed']:.0f}", border=1, align='C', fill=fill, ln=True)
                     
                     pdf_bytes = pdf.output()
