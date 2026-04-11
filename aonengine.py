@@ -12,13 +12,24 @@ from PIL import Image
 APP_NAME = "LabMesh AoN Optimization Engine"
 st.set_page_config(page_title=APP_NAME, layout="wide", initial_sidebar_state="expanded")
 
-# --- PROFESSIONAL BLUE COLOR SCHEME ---
-PROFESSIONAL_BLUE = (0, 75, 125)  # LabMesh Dark Blue
-LIGHT_BLUE_BG = (220, 240, 250)   # Light Blue for accents
+# --- PROFESSIONAL COLOR SCHEME ---
+PROFESSIONAL_BLUE = (0, 75, 125)
+LIGHT_BLUE_BG = (220, 240, 250)
+INTERPRETATION_COLORS = {
+    "Breach": (150, 0, 0),         
+    "Green": (0, 150, 0),          
+    "Grey": (150, 150, 150),        
+}
 
 # --- CUSTOM CSS ---
 st.markdown("""
     <style>
+    div[data-testid="metric-container"] {
+        background-color: #f8f9fa;
+        border: 1px solid #e9ecef;
+        padding: 5% 5% 5% 10%;
+        border-radius: 5px;
+    }
     div.stButton > button {
         background-color: #004b7d;
         color: white;
@@ -29,20 +40,23 @@ st.markdown("""
         background-color: #0060a0;
         color: white;
     }
+    .app-title {
+        margin-top: 15px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# APP HEADER & LOGO (ALWAYS VISIBLE)
+# APP HEADER & LOGO
 # ==========================================
-col_logo, col_title = st.columns([1, 15])
+col_logo, col_title = st.columns([1.5, 10]) 
 with col_logo:
     if os.path.exists("logo.png"):
-        st.image(Image.open("logo.png"), width=70)
+        st.image(Image.open("logo.png"), width=150) 
     else:
         st.markdown("<h2>🧪</h2>", unsafe_allow_html=True)
 with col_title:
-    st.title(APP_NAME)
+    st.markdown(f'<h1 class="app-title">{APP_NAME}</h1>', unsafe_allow_html=True)
 st.markdown("---")
 
 # ==========================================
@@ -61,24 +75,23 @@ class PDFReport(FPDF):
         self.alias_nb_pages()
 
     def header(self):
-        # Logo
         if self.logo_path and os.path.exists(self.logo_path):
-            self.image(self.logo_path, 10, 8, 25) 
+            self.image(self.logo_path, 10, 8, 45) 
             
-        # Title
-        self.set_font("helvetica", 'B', 16)
+        self.set_y(15) 
+        self.set_font("helvetica", 'B', 18)
         self.set_text_color(*PROFESSIONAL_BLUE)
         self.cell(0, 10, "PBRTQC Performance Verification", ln=True, align='R')
         self.set_font("helvetica", 'I', 10)
         self.set_text_color(100, 100, 100)
         self.cell(0, 5, f"Generated for: {self.org_name}", ln=True, align='R')
-        self.ln(10)
+        self.ln(15) 
 
     def footer(self):
         self.set_y(-15)
         self.set_font("helvetica", 'I', 8)
         self.set_text_color(128, 128, 128)
-        self.cell(0, 10, "© 2024 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", 0, 0, 'C')
+        self.cell(0, 10, "© 2026 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", 0, 0, 'C')
         self.set_x(-20)
         self.cell(20, 10, f"Page {self.page_no()}/{{nb}}", 0, 0, 'R')
 
@@ -96,18 +109,22 @@ class PDFReport(FPDF):
 st.sidebar.title("📂 1. Data Ingestion")
 st.sidebar.markdown("Upload and cleanse your historical data first.")
 
-uploaded_file = st.sidebar.file_uploader("Upload LIS/Middleware Data (CSV)", type=['csv'])
+uploaded_file = st.sidebar.file_uploader(
+    "Upload LIS/Middleware Data (CSV)", 
+    type=['csv'],
+    help="Upload your raw data extract. The file should be in CSV format and contain at least: Date/Time, Instrument Name, Test ID, and Result Value."
+)
 
 if uploaded_file:
     df_raw = pd.read_csv(uploaded_file)
     actual_columns = df_raw.columns.tolist()
     
     with st.sidebar.expander("⚙️ Column Mapping", expanded=False):
-        date_col = st.selectbox("Date Column", actual_columns, index=0)
-        date_format = st.selectbox("Date Format", ["Auto-detect", "YYYYMMDDHHMMSS (Dense)", "YYYY-MM-DD HH:MM:SS", "DD/MM/YYYY HH:MM:SS", "MM/DD/YYYY HH:MM:SS"])
-        inst_col = st.selectbox("Instrument Column", actual_columns, index=0)
-        test_col = st.selectbox("Test ID Column", actual_columns, index=0)
-        val_col = st.selectbox("Result Value Column", actual_columns, index=0)
+        date_col = st.selectbox("Date Column", actual_columns, index=0, help="Select the column containing the timestamp for each test result.")
+        date_format = st.selectbox("Date Format", ["Auto-detect", "YYYYMMDDHHMMSS (Dense)", "YYYY-MM-DD HH:MM:SS", "DD/MM/YYYY HH:MM:SS", "MM/DD/YYYY HH:MM:SS"], help="If 'Auto-detect' fails, manually specify how the dates are formatted in your file.")
+        inst_col = st.selectbox("Instrument Column", actual_columns, index=0, help="Select the column that identifies which analyzer performed the test.")
+        test_col = st.selectbox("Test ID Column", actual_columns, index=0, help="Select the column that contains the name or ID of the assay (e.g., AST, K, Na).")
+        val_col = st.selectbox("Result Value Column", actual_columns, index=0, help="Select the column containing the actual numeric result of the test.")
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("🧹 2. Gross Cleansing")
@@ -121,8 +138,8 @@ if uploaded_file:
         selected_insts = st.sidebar.multiselect("Select Instrument(s)", unique_inst, default=unique_inst[0] if len(unique_inst) > 0 else None)
         
         if selected_insts:
-            gross_min = st.sidebar.number_input("Min Physiological Value", value=0.0)
-            gross_max = st.sidebar.number_input("Max Physiological Value", value=500.0)
+            gross_min = st.sidebar.number_input("Min Physiological Value", value=0.0, help="Absolute lowest possible value for this assay. Anything lower is considered a gross error and is deleted before AON analysis.")
+            gross_max = st.sidebar.number_input("Max Physiological Value", value=500.0, help="Absolute highest possible value for this assay. Anything higher is considered a gross error and is deleted.")
             
             if st.sidebar.button("Apply Gross Cleansing", type="primary", use_container_width=True):
                 df_inst = df_test[df_test[inst_col].astype(str).isin(selected_insts)].copy()
@@ -139,6 +156,7 @@ if uploaded_file:
                 
                 st.session_state['clean_data'] = df_clean
                 st.session_state['val_col'] = val_col
+                st.session_state['data_usage_flair'] = {"assay": selected_test, "total_points": len(df_clean)}
                 st.sidebar.success(f"✅ Ready! {len(df_clean)} records retained.")
 
 # ==========================================
@@ -147,32 +165,34 @@ if uploaded_file:
 if 'clean_data' not in st.session_state:
     st.info("👈 Please upload and cleanse your data in the sidebar to unlock the dashboard.")
 else:
-    # --- CONFIGURATION SECTION ---
+    total_rows = st.session_state['data_usage_flair']['total_points']
+    
     with st.expander("🛠️ Simulation & AON Configurations", expanded=True):
         col_meta, col_aon, col_sim = st.columns(3)
         
         with col_meta:
             st.markdown("##### 📝 Report Metadata")
             org_name = st.text_input("Organization", value="Roche Diagnostics India")
-            assay_name = st.text_input("Assay Name", value="AST_KRL")
+            assay_name = st.text_input("Assay Name", value=st.session_state['data_usage_flair']['assay'])
             unit = st.text_input("Unit", value="U/L")
             
         with col_aon:
             st.markdown("##### 📐 AON Parameters")
-            algorithm = st.selectbox("Algorithm", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"])
-            operating_mode = st.radio("Operating Mode", ["Continuous (Rolling)", "Batch (Binning)"], horizontal=True)
-            block_sizes_input = st.text_input("Block Sizes (comma-separated)", value="10, 25, 50, 100")
+            algorithm = st.selectbox("Algorithm", ["Simple Moving Average (SMA)", "Moving Median", "EWMA"], help="SMA is the most common. EWMA gives more weight to recent results, detecting sudden shifts faster.")
+            operating_mode = st.radio("Operating Mode", ["Continuous (Rolling)", "Batch (Binning)"], horizontal=True, help="Continuous checks after every result. Batch waits until 'N' results are collected, averages them, and checks once.")
+            block_sizes_input = st.text_input("Block Sizes (comma-separated)", value="10, 25, 50, 100", help="The number of results (N) used to calculate the average. Smaller blocks detect large errors faster.")
             
+            st.markdown("**Algorithmic Truncation Limits**")
             c_trunc1, c_trunc2 = st.columns(2)
-            with c_trunc1: trunc_min = st.number_input("Lower Truncation Limit", value=5.0, step=0.1)
-            with c_trunc2: trunc_max = st.number_input("Upper Truncation Limit", value=60.0, step=0.1)
-            control_limit_z = st.number_input("Z-Score Multiplier", value=3.0, step=0.1)
+            with c_trunc1: trunc_min = st.number_input("Lower Truncation Limit", value=5.0, step=0.1, help="Results below this value are ignored to isolate the 'normal' healthy population.")
+            with c_trunc2: trunc_max = st.number_input("Upper Truncation Limit", value=60.0, step=0.1, help="CRITICAL: Results above this are ignored. Do not set this too high, or outliers will mask real errors!")
+            control_limit_z = st.number_input("Control Limits Z-Score", value=3.0, step=0.1, help="Determines how wide your limits are. 3.0 is standard. Lowering it increases sensitivity but adds false alarms.")
 
         with col_sim:
             st.markdown("##### 🎯 Simulation Settings")
             c_sim1, c_sim2 = st.columns(2)
-            with c_sim1: samples_before = st.number_input("Samples Before", value=150, step=10)
-            with c_sim2: samples_after = st.number_input("Samples After", value=500, step=10)
+            with c_sim1: samples_before = st.number_input("Samples Before", value=150, step=10, help="The 'warm-up' period. The number of normal samples processed to establish a stable baseline *before* the error is injected.")
+            with c_sim2: samples_after = st.number_input("Samples After", value=500, step=10, help="The 'runway'. The max number of samples the engine will process after injecting the error to see if an alarm triggers.")
             
             try:
                 max_n = max([int(n.strip()) for n in block_sizes_input.split(',') if n.strip().isdigit()])
@@ -180,12 +200,10 @@ else:
                 max_n = 50
                 
             ideal_after = max_n * 5
-            total_rows = len(st.session_state['clean_data'])
             if ideal_after > (total_rows * 0.4): ideal_after = int(total_rows * 0.4)
-                
-            st.caption(f"💡 **Tip:** Set 'Samples After' to at least **{ideal_after}** (based on max N={max_n} and dataset size).")
+            st.caption(f"💡 **Tip:** Set 'Samples After' to at least **{ideal_after}** (based on max N={max_n} and your {total_rows}-row dataset) to ensure enough runway.")
 
-            sim_runs = st.number_input("Simulations per Bias", min_value=5, max_value=100, value=20)
+            sim_runs = st.number_input("Simulations per Bias", min_value=5, max_value=100, value=20, help="How many times to repeat the Monte Carlo simulation to find the median detection speed.")
             
             st.markdown("**Bias Range (%)**")
             b_col1, b_col2, b_col3 = st.columns(3)
@@ -282,7 +300,6 @@ else:
                             "Max NPed": np.max(nped_list)
                         })
 
-            # --- RENDER RESULTS UI ---
             st.markdown("---")
             
             st.subheader("📊 Baseline Limits per Window")
