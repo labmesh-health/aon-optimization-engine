@@ -9,22 +9,22 @@ import tempfile
 from fpdf import FPDF
 from PIL import Image
 
-# --- PAGE CONFIGURATION ---
+# --- PAGE CONFIGURATION & BRANDING ---
 APP_NAME = "LabMesh AoN Optimization Engine"
 st.set_page_config(page_title=APP_NAME, layout="wide", initial_sidebar_state="expanded")
 
 # --- PROFESSIONAL BLUE COLOR SCHEME ---
-PROFESSIONAL_BLUE = (0, 75, 125)  # Professional Dark Blue
-LIGHT_BLUE_BG = (220, 240, 250)    # Professional Very Light Blue
+PROFESSIONAL_BLUE = (0, 75, 125)  
+LIGHT_BLUE_BG = (220, 240, 250)    
 
 # --- Define standard Interpretive Flair colors for the PDF report ---
 INTERPRETATION_COLORS = {
-    "Breach": (150, 0, 0),         # Professional Red for limit breaches
-    "Green": (0, 150, 0),          # Professional Green
-    "Grey": (150, 150, 150),        # Professional Grey
+    "Breach": (150, 0, 0),         
+    "Green": (0, 150, 0),          
+    "Grey": (150, 150, 150),        
 }
 
-# --- CUSTOM CSS FOR DASHBOARD UX ---
+# --- CUSTOM CSS ---
 st.markdown("""
     <style>
     div[data-testid="metric-container"] {
@@ -43,7 +43,6 @@ st.markdown("""
         background-color: #0060a0;
         color: white;
     }
-    /* Align Title with larger logo */
     .app-title {
         margin-top: 15px;
     }
@@ -51,7 +50,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# APP HEADER & LOGO (LARGER SIZE)
+# APP HEADER & LOGO 
 # ==========================================
 col_logo, col_title = st.columns([1.5, 10]) 
 with col_logo:
@@ -169,12 +168,11 @@ if uploaded_file:
 if 'clean_data' not in st.session_state:
     st.info("👈 Please upload and cleanse your data in the sidebar to unlock the dashboard.")
 else:
-    # Safely get the total rows and assay name, defaulting if not yet set
     try:
         total_rows = st.session_state['data_usage_flair']['total_points']
         default_assay = st.session_state['data_usage_flair']['assay']
     except KeyError:
-        total_rows = 1000 # Safe fallback
+        total_rows = 1000 
         default_assay = "Assay"
         
     with st.expander("🛠️ Simulation & AON Configurations", expanded=True):
@@ -250,14 +248,16 @@ else:
                 lcl = target_mean - (control_limit_z * ma_sd)
                 
                 baseline_stats.append({
+                    "Window / Block Size (N)": n,
                     "Block Size (N)": n,
                     "Target Mean": target_mean,
                     "Baseline SD": ma_sd,
+                    "Lower Control Limit (LCL)": lcl,
+                    "Upper Control Limit (UCL)": ucl,
                     "LCL": lcl,
                     "UCL": ucl
                 })
                 
-                # Pre-Flight Warning
                 max_bias_pct = max([abs(b) for b in biases]) / 100.0
                 max_theoretical_shift = target_mean * max_bias_pct
                 distance_to_ucl = ucl - target_mean
@@ -341,10 +341,22 @@ else:
                 if not res_df.empty:
                     c_chart1, c_chart2 = st.columns([2, 1])
                     with c_chart1:
-                        fig_line = px.line(res_df, x="Bias (%)", y="Median NPed", color="Block Size (N)", markers=True, title="Bias Detection Curves")
-                        fig_line.update_layout(template="plotly_white")
+                        fig_line = px.line(res_df, x="Bias (%)", y="Median NPed", color="Block Size (N)", markers=True, title="Bias Detection Curves (All Block Sizes)")
+                        fig_line.update_layout(template="plotly_white", height=600)
                         st.plotly_chart(fig_line, use_container_width=True)
-                    
+                        
+                        # --- DYNAMIC CHART 1 SUMMARY ---
+                        with st.expander("📝 Data Interpretation Notes: Multi-Window Curves", expanded=True):
+                            st.markdown(f"**Observations from the simulated data:**")
+                            st.markdown(f"* **Sensitivity vs. Speed:** Smaller block sizes (e.g., N={block_sizes[0]}) generally detect large shifts faster. Larger blocks tend to be better at confirming smaller, subtle shifts.")
+                            # Check if the smallest bias was detected by any window
+                            smallest_bias_mag = min([abs(b) for b in biases])
+                            smallest_bias_results = res_df[res_df['Bias (%)'].abs() == smallest_bias_mag]
+                            if not smallest_bias_results.empty:
+                                min_detect_n = smallest_bias_results.loc[smallest_bias_results['Median NPed'].idxmin()]['Block Size (N)']
+                                st.markdown(f"* **Small Bias Detection:** For the smallest simulated shift (±{smallest_bias_mag}%), window size **N={min_detect_n}** provided the fastest median detection.")
+                            st.caption("*Disclaimer: These observations are based on Monte Carlo simulations of historic data. They do not constitute clinical guidance. Always compare ANPed targets to analytical quality specifications (e.g., allowable total error).*")
+
                     with c_chart2:
                         primary_n = str(block_sizes[0])
                         primary_df = res_df[res_df["Block Size (N)"] == primary_n].sort_values("Bias (%)")
@@ -354,8 +366,29 @@ else:
                             error_y=dict(type='data', array=primary_df["Max NPed"] - primary_df["Median NPed"], arrayminus=primary_df["Median NPed"] - primary_df["Min NPed"], visible=True),
                             marker_color='#004b7d'
                         ))
-                        fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white")
+                        fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white", height=600)
                         st.plotly_chart(fig_bar, use_container_width=True)
+                        
+                        # --- DYNAMIC CHART 2 SUMMARY ---
+                        with st.expander(f"📝 Data Interpretation Notes: Primary Window (N={primary_n})", expanded=True):
+                            st.markdown(f"**Observations from the simulated data:**")
+                            
+                            # Analyze the -5% / +5% (or smallest bias) behavior
+                            smallest_bias = primary_df['Bias (%)'].abs().min()
+                            small_bias_data = primary_df[primary_df['Bias (%)'].abs() == smallest_bias]
+                            if not small_bias_data.empty:
+                                median_val = small_bias_data['Median NPed'].max() # Use max of the +/- to be conservative
+                                st.markdown(f"* **Subtle Shifts:** A small shift of ±{smallest_bias}% requires a median of **~{median_val:.0f}** patient results to trigger an alarm in this configuration.")
+                            
+                            # Analyze the larger shifts
+                            largest_bias = primary_df['Bias (%)'].abs().max()
+                            large_bias_data = primary_df[primary_df['Bias (%)'].abs() == largest_bias]
+                            if not large_bias_data.empty:
+                                median_val_large = large_bias_data['Median NPed'].min()
+                                st.markdown(f"* **Critical Shifts:** A massive shift of ±{largest_bias}% is caught much faster, requiring a median of only **~{median_val_large:.0f}** patient results.")
+                                
+                            st.markdown(f"* **Variance:** The error bars (whiskers) indicate the minimum and maximum detection times observed during the {sim_runs} simulation runs. Wider bars mean less consistent detection.")
+                            st.caption(f"*Disclaimer: The clinical significance of a ±{smallest_bias}% shift depends entirely on the biological variation of {assay_name}. Evaluate if {median_val:.0f} reported patients is an acceptable risk for your laboratory.*")
 
             with tab_data:
                 st.markdown("#### Bias Impact Analysis")
@@ -392,29 +425,24 @@ else:
                     )
                     pdf.add_page()
                     
-                    # Executive Summary
                     pdf.section_title("Executive Summary")
                     pdf.set_font("helvetica", '', 11)
                     pdf.multi_cell(0, 6, f"This document verifies the performance of the {algorithm} PBRTQC algorithm for {assay_name} ({unit}). The simulation was conducted in {operating_mode} mode using {total_rows} validated historical patient records. The results below outline the baseline statistical noise and the Median Number of Patient Results until Error Detection (ANPed) across various systematic bias shifts.")
                     
-                    # Parameters Box
                     pdf.ln(5)
                     pdf.set_fill_color(240, 240, 240)
                     pdf.set_font("helvetica", 'B', 10)
                     pdf.cell(95, 8, f" Truncation Range: {trunc_min} - {trunc_max} {unit}", border=1, fill=True)
                     pdf.cell(95, 8, f" Control Limits Z-Score: {control_limit_z}", border=1, fill=True, ln=True)
                     
-                    # Primary Target Stats
                     pdf.section_title(f"Baseline Statistics (Primary Window N={primary_stat['Block Size (N)']})")
                     pdf.set_font("helvetica", '', 11)
                     pdf.cell(0, 8, f"Target Mean: {primary_stat['Target Mean']:.3f} {unit}    |    Baseline SD: {primary_stat['Baseline SD']:.3f}", ln=True)
                     pdf.cell(0, 8, f"Upper Control Limit (UCL): {primary_stat['UCL']:.3f} {unit}", ln=True)
                     pdf.cell(0, 8, f"Lower Control Limit (LCL): {primary_stat['LCL']:.3f} {unit}", ln=True)
                     
-                    # Data Table
                     pdf.section_title("Error Detection Performance (ANPed)")
                     
-                    # Colored Table Header
                     pdf.set_fill_color(*PROFESSIONAL_BLUE)
                     pdf.set_text_color(255, 255, 255)
                     pdf.set_font("helvetica", 'B', 10)
@@ -424,7 +452,6 @@ else:
                     pdf.cell(col_w[2], 8, "Median ANPed", border=1, align='C', fill=True)
                     pdf.cell(col_w[3], 8, "Range (Min - Max)", border=1, align='C', fill=True, ln=True)
                     
-                    # Table Rows
                     pdf.set_text_color(0, 0, 0)
                     pdf.set_font("helvetica", '', 10)
                     
@@ -435,7 +462,6 @@ else:
                         pdf.cell(col_w[0], 8, str(row['Block Size (N)']), border=1, align='C', fill=fill)
                         pdf.cell(col_w[1], 8, f"{row['Bias (%)']}%", border=1, align='C', fill=fill)
                         
-                        # Color code the median result
                         if row['Median NPed'] < 50: pdf.set_text_color(*INTERPRETATION_COLORS["Green"])
                         elif row['Median NPed'] > 200: pdf.set_text_color(*INTERPRETATION_COLORS["Breach"])
                         else: pdf.set_text_color(0, 0, 0)
