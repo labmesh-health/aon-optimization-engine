@@ -7,9 +7,11 @@ import random
 import os
 import tempfile
 from fpdf import FPDF
+from PIL import Image
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="PBRTQC / AON Optimization Engine", layout="wide", initial_sidebar_state="expanded")
+# --- PAGE CONFIGURATION & BRANDING ---
+APP_NAME = "LabMesh AoN Optimization Engine"
+st.set_page_config(page_title=APP_NAME, layout="wide", initial_sidebar_state="expanded")
 
 # --- PROFESSIONAL BLUE COLOR SCHEME ---
 PROFESSIONAL_BLUE = (0, 75, 125)  # Professional Dark Blue
@@ -45,6 +47,19 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
+# HEADER & BRANDING
+# ==========================================
+col_logo, col_title = st.columns([1, 15])
+with col_logo:
+    if os.path.exists("logo.png"):
+        st.image(Image.open("logo.png"), width=60)
+    else:
+        st.markdown("<h2>🧪</h2>", unsafe_allow_html=True)
+with col_title:
+    st.title(APP_NAME)
+st.markdown("---")
+
+# ==========================================
 # SUBCLASS FPDF FOR PROFESSIONAL REPORTS
 # ==========================================
 class PDFReport(FPDF):
@@ -58,28 +73,28 @@ class PDFReport(FPDF):
         self.logo_path = logo_path
         self.set_auto_page_break(auto=True, margin=15)
         self.alias_nb_pages()
-        self.set_fill_color(*LIGHT_BLUE_BG) # Default fill
-        self.set_draw_color(0, 0, 0) # Normal borders
+        self.set_fill_color(*LIGHT_BLUE_BG) 
+        self.set_draw_color(0, 0, 0) 
 
     def header(self):
         if self.logo_path and os.path.exists(self.logo_path):
-            self.image(self.logo_path, 10, 8, 30) # Path, x, y, width
+            self.image(self.logo_path, 10, 8, 30) 
         else:
              self.set_draw_color(*INTERPRETATION_COLORS["Grey"])
              self.rect(10, 8, 30, 20)
              self.set_xy(11, 10)
              self.set_font("helvetica", 'I', 8)
-             self.cell(28, 16, "Place Website Logo here (logo.png)", align='C')
+             self.cell(28, 16, "LabMesh Logo", align='C')
              self.set_text_color(0)
-             self.set_draw_color(0) # Reset to black borders
+             self.set_draw_color(0) 
 
         self.set_font("helvetica", 'B', 12)
         self.set_text_color(*PROFESSIONAL_BLUE)
-        self.set_xy(10, 8) # Move to right of logo
+        self.set_xy(10, 8) 
         self.cell(0, 10, self.org_name, ln=True, align='R')
         self.set_font("helvetica", 'B', 20)
         self.set_text_color(0)
-        self.cell(0, 15, "PBRTQC Performance Verification Report", ln=True, align='C')
+        self.cell(0, 15, f"{APP_NAME}: Verification Report", ln=True, align='C')
         self.set_font("helvetica", 'I', 10)
         now = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
         self.cell(0, 8, f"Report Generated: {now}", ln=True, align='R')
@@ -89,7 +104,7 @@ class PDFReport(FPDF):
         self.set_y(-15)
         self.set_font("helvetica", 'I', 8)
         self.set_text_color(*INTERPRETATION_COLORS["Grey"])
-        self.cell(0, 10, "© 2024 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", ln=True, align='C')
+        self.cell(0, 10, "© 2026 LabMesh. All Rights Reserved. A general quality improvement tool. Clinical decisions remain with the laboratory.", ln=True, align='C')
         self.set_x(-20)
         self.cell(20, 10, f"Page {self.page_no()}/{{nb}}", ln=True, align='R')
 
@@ -98,7 +113,7 @@ class PDFReport(FPDF):
         self.set_font("helvetica", 'B', 14)
         self.set_text_color(*PROFESSIONAL_BLUE)
         self.cell(0, 10, label, ln=True)
-        self.set_text_color(0) # Reset to black
+        self.set_text_color(0) 
         self.ln(3)
 
     def dynamic_intro_flair(self):
@@ -144,14 +159,12 @@ class PDFReport(FPDF):
             ("Baseline Standard Deviation", f"{stat_row['Baseline SD']:.3f}"),
             ("Upper Control Limit (UCL)", f"{stat_row['Upper Control Limit (UCL)']:.3f} {self.unit}"),
             ("Lower Control Limit (LCL)", f"{stat_row['Lower Control Limit (LCL)']:.3f} {self.unit}"),
-            ("Simulated Max Theoretical Shift (Mean + Max Bias)", f"{bias_impact_data_all[0]['Shifted Theoretical Mean']:.3f} {self.unit}") 
+            ("Simulated Max Theoretical Shift (Mean + Max Bias)", f"{bias_impact_data_all[-1]['Shifted Theoretical Mean']:.3f} {self.unit}") # Pulling the max bias theoretically
         ]
-        
         for prop, val in data_rows:
             self.cell(property_w, 8, prop, border=1)
             self.cell(value_w, 8, str(val), border=1, ln=True)
         self.ln(5)
-
         self.interpretaion_notes(N, stat_row['Target Mean'], stat_row['Upper Control Limit (UCL)'], algorithm)
 
     def multi_block_results_table(self, results_df):
@@ -213,15 +226,14 @@ class PDFReport(FPDF):
         self.ln(5)
 
     def interpretaion_notes(self, N, target, ucl, algorithm_type):
+        self.set_text_color(0)
         if N == 0:
             notes = "Verification Notes: All clinical decisions are the sole responsibility of the laboratory. NPed is the Median Number of Patient Results until Error Detection *within* a group based on Monte Carlo simulations. The tool provides a general verification of the historic data. Results may not apply to new patient populations or analyzer conditions. Interpretation color-coding (Green/Red) uses standard laboratory improvement targets. For official validation, a clinically relevant detection speed (ANPed) target should be compared to the actual Median ANPed performance results based on biological variation specifications and clinical assay goals."
-            self.set_text_color(0)
             self.set_font("helvetica", 'I', 10)
             self.multi_cell(0, 5, notes)
             self.ln(5)
         elif N > 0:
              notes = f"Verification Interpretation (Window {N}): This scorecard verifies statistics matching the selected grouping mode. Real-time performance is verifiable inside the comparison table."
-             self.set_text_color(0)
              self.set_font("helvetica", 'I', 10)
              self.multi_cell(0, 5, notes)
              self.ln(3)
@@ -335,14 +347,8 @@ if uploaded_file:
 # MAIN CANVAS: DASHBOARD & SIMULATION
 # ==========================================
 if 'clean_data' not in st.session_state:
-    st.title("⚙️ PBRTQC Optimization Engine")
     st.info("👈 Please upload and cleanse your data in the sidebar to unlock the dashboard.")
 else:
-    st.title("🎛️ AON Simulation Dashboard")
-    
-    total_rows_flair = st.session_state['data_usage_flair']['total_points']
-    default_max_n_flair = 50 
-    
     # --- CONFIGURATION SECTION ---
     with st.expander("🛠️ Simulation & AON Configurations", expanded=True):
         col_meta, col_aon, col_sim = st.columns(3)
@@ -414,10 +420,12 @@ else:
                     help="The 'runway'. The maximum number of samples the engine will process after injecting the error to see if an alarm triggers."
                 )
             
+            # --- DYNAMIC "SAMPLE AFTER" RECOMMENDATION LOGIC ---
+            total_rows_flair = st.session_state['data_usage_flair']['total_points']
             try:
                 max_n_continuous_flair = max([int(n.strip()) for n in block_sizes_input.split(',') if n.strip().isdigit()])
             except:
-                max_n_continuous_flair = default_max_n_flair 
+                max_n_continuous_flair = 50 
                 
             continuous_recommendation_samples_after_flair = max_n_continuous_flair * 5
             safe_dataset_continuous_flair = int(total_rows_flair * 0.4)
@@ -606,7 +614,6 @@ else:
                             title="Bias Detection Curves (All Block Sizes)",
                             labels={"Median NPed": "Results needed for bias detection"}
                         )
-                        # Auto-scales Y-axis
                         fig_line.update_layout(template="plotly_white")
                         st.plotly_chart(fig_line, use_container_width=True)
                     
@@ -632,31 +639,33 @@ else:
                 st.markdown("#### Bias Impact Analysis")
                 st.markdown("Theoretical shifts for the primary window to confirm if limits are breached.")
                 
+                bias_impact_data_all = []
                 if len(baseline_stats) > 0:
                     primary_stat = baseline_stats[0]
                     p_mean = primary_stat["Target Mean"]
                     p_lcl = primary_stat["LCL"]
                     p_ucl = primary_stat["UCL"]
                     
-                    bias_impact_data = []
                     for bias in biases:
                         shifted_mean = p_mean * (1 + (bias / 100.0))
                         will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No 🟢"
-                        bias_impact_data.append({
+                        bias_impact_data_all.append({
                             "Bias (%)": f"{bias}%",
-                            "Shifted Mean": f"{shifted_mean:.3f}",
+                            "Shifted Theoretical Mean": shifted_mean, 
+                            "Display Mean": f"{shifted_mean:.3f}",
                             "LCL": f"{p_lcl:.3f}",
                             "UCL": f"{p_ucl:.3f}",
                             "Breaches Limits?": will_alarm
                         })
-                    st.dataframe(pd.DataFrame(bias_impact_data), use_container_width=True)
+                    
+                    display_df = pd.DataFrame(bias_impact_data_all).drop(columns=['Shifted Theoretical Mean']).rename(columns={'Display Mean': 'Shifted Mean'})
+                    st.dataframe(display_df, use_container_width=True)
 
             with tab_report:
                 st.markdown("#### Generate Professional IFCC Compliance Report")
                 st.info("Exports parameters, historic data context, and verified results into a professional PDF format.")
                 
                 if not res_df.empty and len(baseline_stats) > 0:
-                    # Look for the logo in the current directory
                     logo_file = "logo.png" if os.path.exists("logo.png") else None
 
                     pdf = PDFReport(
@@ -677,23 +686,6 @@ else:
                         total_data_points=st.session_state['data_usage_flair']['total_points'], 
                         org=org_name
                     )
-
-                    # We pass the full list of bias impact data so the scorecard can dynamically reference the max theoretical shift
-                    bias_impact_data_all = []
-                    p_mean = primary_stat["Target Mean"]
-                    p_lcl = primary_stat["LCL"]
-                    p_ucl = primary_stat["UCL"]
-                    for bias in biases:
-                        shifted_mean = p_mean * (1 + (bias / 100.0))
-                        will_alarm = "Yes 🔴" if (shifted_mean > p_ucl or shifted_mean < p_lcl) else "No 🟢"
-                        bias_impact_data_all.append({
-                            "Bias (%)": f"{bias}%",
-                            "Shifted Theoretical Mean": shifted_mean, 
-                            "Display Mean": f"{shifted_mean:.3f}",
-                            "LCL": f"{p_lcl:.3f}",
-                            "UCL": f"{p_ucl:.3f}",
-                            "Breaches Limits?": will_alarm
-                        })
 
                     pdf.professional_aon_scorecard(
                         stat_row=baseline_stats[0], 
