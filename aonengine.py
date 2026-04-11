@@ -195,10 +195,18 @@ else:
             if tea_input > 0 and cv_input > 0:
                 calc_dSEc = (tea_input / cv_input) - 1.65
                 if calc_dSEc > 0:
-                    st.success(f"**Calculated ΔSEc:** {calc_dSEc:.2f} (Critical Shift)")
+                    st.success(f"**Calculated ΔSEc:** {calc_dSEc:.2f}% (Critical Shift)")
+                    # --- NEW ADDITION: EXPLANATORY NOTE ---
+                    st.caption("""
+                    💡 **What is ΔSEc?** The Critical Systematic Error (ΔSEc) is the exact percentage your assay must drift to exceed your Total Allowable Error (TEa), factoring in your current CV. 
+                    
+                    **Why it matters:** This is your critical failure point. To protect patients, your AON configuration must be able to detect a bias of this magnitude quickly (low Median ANPed).
+                    """)
                 else:
                     st.error("Calculated ΔSEc is ≤ 0. Check TEa and CV values.")
                     calc_dSEc = None
+            elif tea_input > 0 or cv_input > 0:
+                st.warning("Please enter BOTH TEa and CV to calculate ΔSEc.")
 
         with col_aon:
             st.markdown("##### 📐 AON Parameters")
@@ -454,7 +462,6 @@ else:
                     pdf.set_fill_color(240, 240, 240)
                     pdf.set_font("helvetica", 'B', 10)
                     
-                    # Include Clinical Goals in PDF if available
                     if calc_dSEc:
                         pdf.cell(63, 8, f" Truncation: {trunc_min} - {trunc_max} {unit}", border=1, fill=True)
                         pdf.cell(63, 8, f" Z-Score: {control_limit_z}", border=1, fill=True)
@@ -497,7 +504,6 @@ else:
                         
                         pdf.cell(col_w[0], 8, str(row['Block Size (N)']), border=1, align='C', fill=fill)
                         
-                        # Highlight the bias row if it matches or exceeds the critical shift
                         is_critical = False
                         if calc_dSEc and abs(row['Bias (%)']) >= calc_dSEc and abs(row['Bias (%)']) < calc_dSEc + bias_step:
                             is_critical = True
