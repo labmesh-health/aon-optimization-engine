@@ -190,17 +190,13 @@ else:
             with c_tea2:
                 cv_input = st.number_input("Analytical CV (%)", value=0.0, step=0.1, help="The current analytical Coefficient of Variation for this assay.")
 
-            # Calculate dSEc if inputs are valid
             calc_dSEc = None
             if tea_input > 0 and cv_input > 0:
                 calc_dSEc = (tea_input / cv_input) - 1.65
                 if calc_dSEc > 0:
                     st.success(f"**Calculated ΔSEc:** {calc_dSEc:.2f}% (Critical Shift)")
-                    # --- NEW ADDITION: EXPLANATORY NOTE ---
                     st.caption("""
                     💡 **What is ΔSEc?** The Critical Systematic Error (ΔSEc) is the exact percentage your assay must drift to exceed your Total Allowable Error (TEa), factoring in your current CV. 
-                    
-                    **Why it matters:** This is your critical failure point. To protect patients, your AON configuration must be able to detect a bias of this magnitude quickly (low Median ANPed).
                     """)
                 else:
                     st.error("Calculated ΔSEc is ≤ 0. Check TEa and CV values.")
@@ -259,6 +255,9 @@ else:
             base_mask = (df[v_col] >= trunc_min) & (df[v_col] <= trunc_max)
             df_trunc = df[base_mask].copy()
             
+            # For EFLM guideline analysis later
+            pct_data_retained = (len(df_trunc) / len(df)) * 100 
+            
             for n in block_sizes:
                 if "Simple" in algorithm: baseline_ma = df_trunc[v_col].rolling(window=n).mean()
                 elif "Median" in algorithm: baseline_ma = df_trunc[v_col].rolling(window=n).median()
@@ -287,13 +286,7 @@ else:
                 distance_to_ucl = ucl - target_mean
                 
                 if max_theoretical_shift < distance_to_ucl:
-                    st.warning(f"""
-                    ⚠️ **Pre-Flight Warning for Block Size N={n}: Your Truncation Limits are too wide!**
-                    * **Baseline Noise (Distance to Control Limit):** {distance_to_ucl:.2f}
-                    * **Max Error Shift (Mean × Max Bias):** {max_theoretical_shift:.2f}
-                    
-                    *The simulated error is mathematically invisible to the algorithm. Lower your Upper Truncation Limit to shrink the baseline noise.*
-                    """)
+                    st.warning(f"⚠️ **Pre-Flight Warning for Block Size N={n}: Your Truncation Limits are too wide!** The simulated error is mathematically invisible to the algorithm. Lower your Upper Truncation Limit.")
                 
                 for bias in biases:
                     nped_list = []
@@ -367,7 +360,6 @@ else:
                     with c_chart1:
                         fig_line = px.line(res_df, x="Bias (%)", y="Median NPed", color="Block Size (N)", markers=True, title="Bias Detection Curves (All Block Sizes)")
                         
-                        # Add dSEc lines if calculated
                         if calc_dSEc:
                             fig_line.add_vline(x=calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"+ΔSEc ({calc_dSEc:.1f}%)")
                             fig_line.add_vline(x=-calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"-ΔSEc ({-calc_dSEc:.1f}%)")
@@ -375,16 +367,46 @@ else:
                         fig_line.update_layout(template="plotly_white", height=600)
                         st.plotly_chart(fig_line, use_container_width=True)
                         
-                        with st.expander("📝 Data Interpretation Notes: Multi-Window Curves", expanded=True):
-                            if calc_dSEc:
-                                st.markdown(f"**Clinical Quality Goal Analysis (TEa: {tea_input}%, CV: {cv_input}%):**")
-                                st.markdown(f"* The calculated Critical Systematic Error (**ΔSEc**) is **±{calc_dSEc:.2f}%**. The red dashed lines indicate this critical failure point.")
-                                st.markdown(f"* To ensure clinical safety, the chosen AON configuration should demonstrate a low Median ANPed at or before this critical bias level.")
-                            else:
-                                st.warning("⚠️ **Clinical Applicability Note:** This simulation was run without a defined Total Allowable Error (TEa) or analytical CV. While the data shows how the algorithm responds to mathematical shifts, evaluating true clinical utility requires comparing these detection speeds against your laboratory's specific quality goals.")
+                        # --- AI RECOMMENDATION ENGINE ---
+                        with st.expander("💡 LabMesh AI Recommendation & Guidelines Analysis", expanded=True):
+                            st.markdown("### 🏛️ Global Guidelines Alignment (EFLM / IFCC)")
                             
-                            st.markdown(f"**General Observations:**")
-                            st.markdown(f"* **Sensitivity vs. Speed:** Smaller block sizes generally detect large shifts faster. Larger blocks tend to be better at confirming smaller, subtle shifts.")
+                            # 1. Truncation Check
+                            if pct_data_retained > 95:
+                                st.warning(f"**Truncation Limits:** Your limits ({trunc_min}-{trunc_max}) retain **{pct_data_retained:.1f}%** of the data. EFLM guidelines recommend tighter truncation (excluding more outliers, aiming for the central 80-90%) to improve the signal-to-noise ratio and detect errors faster.")
+                            else:
+                                st.success(f"**Truncation Limits:** Your limits retain **{pct_data_retained:.1f}%** of the data. This aligns well with IFCC/EFLM principles of isolating the normal population to reduce biological noise.")
+                                
+                            # 2. Algorithm Check
+                            if "Simple" in algorithm:
+                                st.info("**Algorithm:** You selected Simple Moving Average (SMA). While widely used, recent EFLM working groups suggest exploring **EWMA** (Exponentially Weighted) for detecting smaller, critical shifts more rapidly.")
+                            else:
+                                st.success(f"**Algorithm:** You selected {algorithm}, which aligns with advanced PBRTQC implementations recommended by global laboratory guidelines.")
+                            
+                            st.markdown("### ⚙️ Optimal Block Size Recommendation")
+                            best_n = None
+                            
+                            if calc_dSEc:
+                                valid_biases = res_df[res_df['Bias (%)'].abs() >= calc_dSEc]['Bias (%)'].abs().unique()
+                                if len(valid_biases) > 0:
+                                    target_bias = min(valid_biases)
+                                    target_data = res_df[res_df['Bias (%)'].abs() == target_bias]
+                                    best_row = target_data.loc[target_data['Median NPed'].idxmin()]
+                                    best_n = best_row['Block Size (N)']
+                                    reasoning = f"It provides the fastest median detection (**{best_row['Median NPed']:.0f} samples**) at the critical bias level closest to your ΔSEc (±{target_bias}%)."
+                                else:
+                                    st.error("The simulated bias range did not extend far enough to cover your ΔSEc. Increase the Max Bias.")
+                            else:
+                                smallest_bias_mag = res_df['Bias (%)'].abs().min()
+                                target_data = res_df[res_df['Bias (%)'].abs() == smallest_bias_mag]
+                                best_row = target_data.loc[target_data['Median NPed'].idxmin()]
+                                best_n = best_row['Block Size (N)']
+                                reasoning = f"It provides the fastest median detection (**{best_row['Median NPed']:.0f} samples**) for the most subtle simulated shift (±{smallest_bias_mag}%)."
+                            
+                            if best_n:
+                                st.markdown(f"**Recommended Starting N:** **`{best_n}`**")
+                                st.markdown(f"**Why:** {reasoning}")
+                                st.markdown(f"**Next Steps:** Implement N={best_n} with Z={control_limit_z} in your middleware. **Crucially**, monitor the False Alarm Rate (FAR) for 2-4 weeks. EFLM guidelines recommend aiming for a FAR of < 1 per month. If it alarms too often, widen the Z-score or increase N.")
 
                     with c_chart2:
                         primary_n = str(block_sizes[0])
@@ -396,28 +418,12 @@ else:
                             marker_color='#004b7d'
                         ))
                         
-                        # Add dSEc lines if calculated
                         if calc_dSEc:
                             fig_bar.add_vline(x=calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"+ΔSEc")
                             fig_bar.add_vline(x=-calc_dSEc, line_width=2, line_dash="dash", line_color="red", annotation_text=f"-ΔSEc")
 
                         fig_bar.update_layout(title=f"MA Validation (N={primary_n})", template="plotly_white", height=600)
                         st.plotly_chart(fig_bar, use_container_width=True)
-                        
-                        with st.expander(f"📝 Data Interpretation Notes: Primary Window (N={primary_n})", expanded=True):
-                            st.markdown(f"**Observations from the simulated data:**")
-                            smallest_bias = primary_df['Bias (%)'].abs().min()
-                            small_bias_data = primary_df[primary_df['Bias (%)'].abs() == smallest_bias]
-                            if not small_bias_data.empty:
-                                median_val = small_bias_data['Median NPed'].max() 
-                                st.markdown(f"* **Subtle Shifts:** A small shift of ±{smallest_bias}% requires a median of **~{median_val:.0f}** patient results to trigger an alarm.")
-                            
-                            largest_bias = primary_df['Bias (%)'].abs().max()
-                            large_bias_data = primary_df[primary_df['Bias (%)'].abs() == largest_bias]
-                            if not large_bias_data.empty:
-                                median_val_large = large_bias_data['Median NPed'].min()
-                                st.markdown(f"* **Critical Shifts:** A massive shift of ±{largest_bias}% is caught much faster, requiring a median of only **~{median_val_large:.0f}** patient results.")
-                            st.markdown(f"* **Variance:** The error bars indicate the min and max detection times observed during the {sim_runs} runs.")
 
             with tab_data:
                 st.markdown("#### Bias Impact Analysis")
